@@ -1,0 +1,3 @@
+from gym_gazebo_ros.envs.assembler_robot.assembler import AssemblerEnv
+from gym_gazebo_ros.envs.assembler_robot.assemblerv1 import AssemblerPiHEnv
+from gym_gazebo_ros.envs.assembler_robot.assemblerv2 import AssemblerPiHv2Env

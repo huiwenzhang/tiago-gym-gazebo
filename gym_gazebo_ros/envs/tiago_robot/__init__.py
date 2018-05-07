@@ -1,0 +1,1 @@
+from gym_gazebo_ros.envs.tiago_robot.tiago_v0 import TiagoEnv
