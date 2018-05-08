@@ -3,99 +3,69 @@ A TIAGo environment used for manipulation tasks learning based on ros and openai
 
 # Usage
 
-1. add current directory path to `PYTHONPATH` environment
+1. Start ROS launch file and make sure necessary nodes, topics, servers are runing. We can start by runing code:` roslaunch tiago_gazebo tiago_gazebo.launch robot:=titanium world:=empty public_sim:=true`.
 
-```sh
-export PYTHONPATH=$PYTHONPATH:/path/to/gym-gazebo-ros:/path/to/catkin_assembler_ros_python
-```
+2. Test related env in gym
 
-**NOTE:** we can firstly `source` the `catkin_assembler_ros` ros workspace, and then add the `gym-gazebo-ros` path to `PYTHONPATH`, like
-```sh
-# cd /path/to/PyKDL_and_kdl_utils_catkin_ws
-cd /path/to/catkin_assembler_ros
-# If you need compile pykdl with python3, run the following command
-# catkin build  -DPYTHON_VERSION=3.5 -DPYTHON_EXECUTABLE=/usr/bin/python3.5
-source devel/setup.bash
-
-# and we can add the pykdl_utils python pacakge path to this
-
-export PYTHONPATH=$PYTHONPATH:/path/to/gym-gazebo-ros
-```
-
-~~And we also consider using [ros/kdl_parser](https://github.com/ros/kdl_parser) to replace same part of [kdl_utils](https://github.com/jacknlliu/hrl-kdl.git), i.e. `kdl_parser` will be a submodule of `kdl_utils`.~~
-
-
-
-2. add `baselines` path to `PYTHONPATH`
-```
-export PYTHONPATH=/path/to/external_modules/baselines:$PYTHONPATH
-```
-
-In summary,
-```
-export PYTHONPATH=/home/ros/data/DRL_Platforms/external_modules/baselines:/home/ros/data/DRL_Platforms/gym-gazebo-ros:$PYTHONPATH
-```
-
-
-3. test env unit
+3. test env example
 ```py
 import gym
 import gym_gazebo_ros
-env = gym.make('Assembler-v0')
+env = gym.make('Tiago-v0')
 env.reset()
 env.render()
 ```
 
 
-4. test examples
+4. training examples
 
 ```sh
-python3 examples/agents/assembler_pih_ddpg.py --env-id "Assembler-v0" --nb-rollout-steps 1000
+python3 examples/agents/assembler_pih_ddpg.py --env-id "Tiago-v0" --nb-rollout-steps 1000
 
 # or set Actor network and Critic network learning rate 
-python3 examples/agents/assembler_pih_ddpg.py --env-id "Assembler-v0" --nb-rollout-steps 1000 --actor-lr 0.001 --critic-lr 0.001
+python3 examples/agents/assembler_pih_ddpg.py --env-id "Tiago-v0" --nb-rollout-steps 1000 --actor-lr 0.001 --critic-lr 0.001
 ```
 
 Run trpo
 ```
-python3 examples/agents/assembler_pih_trpo.py --env "Assembler-v0" 
+python3 examples/agents/assembler_pih_trpo.py --env "Tiago-v0" 
 ```
 
 
 Run ppo1
 ```
-python3 examples/agents/assembler_pih_ppo1.py --env "Assembler-v0"
+python3 examples/agents/assembler_pih_ppo1.py --env "Tiago-v0"
 ```
 
 Run ppo1 and save model 
 ```
-python3 examples/agents/assembler_pih_ppo1.py --env "Assembler-v1" --save-model-with-prefix "/home/ros/data/DRL_Platforms/pih-logs/models/pih"
+python3 examples/agents/assembler_pih_ppo1.py --env "Tiago-v1" --save-model-with-prefix "/home/ros/data/DRL_Platforms/pih-logs/models/pih"
 ```
 
 Run ppo1, restore model from file, and then save model  
 ```
-python3 examples/agents/assembler_pih_ppo1.py --env "Assembler-v1"  --restore-model-from-file "/home/ros/data/DRL_Platforms/pih-logs/models/pih/openai-2018-04-18-10-49-01-988849_afterIter_489.model"  --save-model-with-prefix "/home/ros/data/DRL_Platforms/pih-logs/models/pih"
+python3 examples/agents/assembler_pih_ppo1.py --env "Tiago-v1"  --restore-model-from-file "/home/ros/data/DRL_Platforms/pih-logs/models/pih/openai-2018-04-18-10-49-01-988849_afterIter_489.model"  --save-model-with-prefix "/home/ros/data/DRL_Platforms/pih-logs/models/pih"
 ```
 
 
 Run ppo2
 ```
-python3 examples/agents/assembler_pih_reacher_ppo2.py --env "Assembler-v0"
+python3 examples/agents/assembler_pih_reacher_ppo2.py --env "Tiago-v0"
 ```
 
 Run ppo2 with our custom lstm policy:
 ```
-python3 examples/agents/assembler_pih_reacher_ppo2.py --env "Assembler-v1" --policy "customlstm"
+python3 examples/agents/assembler_pih_reacher_ppo2.py --env "Tiago-v1" --policy "customlstm"
 ```
 
 Run a2c:
 ```
-python3 examples/agents/assembler_pih_reacher_acer.py --env "Assembler-v0" --policy "lstm" --logdir "/tmp/acer"
+python3 examples/agents/assembler_pih_reacher_acer.py --env "Tiago-v0" --policy "lstm" --logdir "/tmp/acer"
 ```
 
 Run deploying the ppo1 model:
 ```
-python3 examples/agents/assembler_enjoy_pih.py --env "Assembler-v1" --model-file "/home/ros/data/DRL_Platforms/pih-logs/models/pih/openai-2018-04-18-10-49-01-988849_afterIter_489.model"
+python3 examples/agents/assembler_enjoy_pih.py --env "Tiago-v1" --model-file "/home/ros/data/DRL_Platforms/pih-logs/models/pih/openai-2018-04-18-10-49-01-988849_afterIter_489.model"
 ```
 
 
