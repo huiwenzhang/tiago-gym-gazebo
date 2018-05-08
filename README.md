@@ -1,6 +1,5 @@
-# Gym Gazebo ROS
-
-A learning platform based on gym framework and gazebo with ROS for robot learning peg-in-hole.
+# tiago-gym-gazebo
+A TIAGo environment used for manipulation tasks learning based on ros and openai gym
 
 # Usage
 

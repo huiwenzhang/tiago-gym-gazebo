@@ -9,17 +9,19 @@ from . import ros_general_utils as ros_utils # custom user defined ros utils
 from numpy.linalg import inv, norm
 
 # ros related data structure
-from geometry_msgs.msg import Twist, WrenchStamped
+from geometry_msgs.msg import Twist, WrenchStamped, Pose
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint # Used for publishing UR joint angles.
 from control_msgs.msg import * # control with action interface
 from sensor_msgs.msg import LaserScan, JointState
 from std_msgs.msg import Float64MultiArray
 from std_srvs.srv import Empty
+import moveit_msgs.msg
 
 
 # ros related function packages
 import rospy
 import actionlib
+import moveit_commander
 import transforms3d as tf3d
 from gazebo_msgs.srv import GetModelState, GetLinkState, SetModelConfiguration, DeleteModel, SpawnModel, SetModelState
 from gazebo_msgs.msg import ModelState, ContactState, ContactsState
@@ -70,8 +72,7 @@ class TiagoEnv(gym.Env):
         # get the relative state
         rospy.wait_for_service("/gazebo/get_link_state", 10.0)
         self.__get_link_pose_srv = rospy.ServiceProxy(
-            "/gazebo/get_link_state", GetLinkState
-        )
+            "/gazebo/get_link_state", GetLinkState)
         rospy.wait_for_service("/gazebo/pause_physics")
         self.__pause_physics = rospy.ServiceProxy(
             "/gazebo/pause_physics", Empty)
@@ -227,7 +228,8 @@ class TiagoEnv(gym.Env):
         # Rotation = tf3d.euler.euler2mat(0.473038,-1.151761, -0.364322, 'sxyz')
         # Translation = [0.466187,  0.428941, 1.418610]
         # self.ee_target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
-        self.ee_target_pose = self.spawn_dynamic_reaching_goal('ball')
+        self.ee_target_pose, target_pose = self.spawn_dynamic_reaching_goal('ball')
+        self.goal = target_pose # target pose, data type: geometry_msgs.msg.Pose
 
         # define the number of time step for every step know the time, then it can compute something
         # depend on the time
@@ -380,7 +382,7 @@ class TiagoEnv(gym.Env):
 
 
 
-        rospy.loginfo('episode steps is {}, time step index is {}'.format(self.spec.timestep_limit, self.time_step_index))
+        rospy.loginfo('maximum pisode step is {}, current time step index is {}'.format(self.spec.timestep_limit, self.time_step_index))
 
         # TODO: add jacobian cost as part of reward, like GPS, which can avoid the robot explore the sigularity position.
         #  Also can add joint torque as part of reward, like GPS. 
@@ -388,7 +390,7 @@ class TiagoEnv(gym.Env):
         end_pose_dist = state[:7]
         distance = np.sqrt( np.sum(np.array(end_pose_dist[:3])**2) + ros_utils.distance_of_quaternion(end_pose_dist[3:7])**2 )
         # TODO: we should add safety bounds information to reward, not only terminate condition,like some paper!
-        reward = max(0.0, 3.0 - distance)
+        reward = max(0.0, 2.0 - distance)
 
         print("===================reward is: {}==============================".format(reward))
         print("===================distance is : {}===========================".format(distance))
@@ -476,8 +478,9 @@ class TiagoEnv(gym.Env):
         # reset robot first stage
         # self.spawn_dynamic_reaching_goal('ball')
         # self._reset_arm_pose_with_play_motion()
+        self.ee_target_pose, self.goal =  self.spawn_dynamic_reaching_goal('ball')
         self._virtual_reset_arm_config()
-        self._reset_hand_pose()
+        # self._reset_hand_pose()
 
         # self._reset_hand_pose() # no hand, so deprecated
 
@@ -670,7 +673,7 @@ class TiagoEnv(gym.Env):
 
         g = PlayMotionGoal()
         g.motion_name = 'open_hand'
-        g.skip_planning = False
+        g.skip_planning = True
         rospy.loginfo('Sending goal with motion: ' + g.motion_name)
         self.__play_motion_client.send_goal(g)
         rospy.loginfo('Waiting for results (reset)...')
@@ -809,14 +812,14 @@ class TiagoEnv(gym.Env):
 
         return  ee_relative_pose, ee_abs_pos
 
-    def spawn_dynamic_reaching_goal(self, model_name):
+    def spawn_dynamic_reaching_goal(self, model_name, random=False):
         """
         spawn an object in Gazebo and return its pose to robot
         :return:
         """
-        x = 0.9
+        x = 0.5
         y = 0.0
-        z = 1.2
+        z = 0.9
         modelState = ModelState()
         modelState.model_name = model_name
         modelState.pose.orientation.x = 0
@@ -824,15 +827,22 @@ class TiagoEnv(gym.Env):
         modelState.pose.orientation.z = 0
         modelState.pose.orientation.w = 1
         modelState.reference_frame = 'world'
-        modelState.pose.position.x = x
-        modelState.pose.position.y = y + np.random.sample()*0.6 - 0.3
-        modelState.pose.position.z = z + np.random.randn()*0.6 - 0.3
+        if random:
+            modelState.pose.position.x = x + np.random.sample()*0.6 - 0.3
+            modelState.pose.position.y = y
+            modelState.pose.position.z = z + np.random.sample()*0.6 - 0.3
+        else:
+            modelState.pose.position.x = x
+            modelState.pose.position.y = y
+            modelState.pose.position.z = z
+
+        self.__set_model_state(modelState)
 
         Rotation = tf3d.quaternions.quat2mat([modelState.pose.orientation.x, modelState.pose.orientation.y,
                                               modelState.pose.orientation.z, modelState.pose.orientation.w])
         Translation = [modelState.pose.position.x, modelState.pose.position.y, modelState.pose.position.z]
         target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
-        return target_pose
+        return target_pose, modelState.pose
 
 
     def is_task_done(self, state, joint_vel):
@@ -1104,3 +1114,43 @@ class TiagoEnv(gym.Env):
         self.__switch_ctrl.call(start_controllers=["arm_controller"],
                                 stop_controllers=[],
                                 strictness=SwitchControllerRequest.BEST_EFFORT)
+
+    def reach_to_ball(self):
+        """
+        fulfill reaching task with traditional planing methods
+        planing in Cartesian coordinates frame using moveit
+        :return:
+        """
+        rospy.wait_for_service('/gazebo/unpause_physics')
+        try:
+            self.__unpause_physics()
+        except (rospy.ServiceException) as exc:
+            print("/gazebo/unpause_physics service call failed:" + str(exc))
+
+        group = moveit_commander.MoveGroupCommander('arm_torso')
+        robot = moveit_commander.RobotCommander()
+        display_trajectory_publisher = rospy.Publisher(
+                                            '/move_group/display_planned_path',
+                                            moveit_msgs.msg.DisplayTrajectory,
+                                            queue_size=20)
+        # Get information
+        print ("============ Reference frame: %s" % group.get_planning_frame())
+        print("============ End effector: %s" % group.get_end_effector_link())
+        print("============ Robot Groups:")
+        print(robot.get_group_names()) # all groups in tiago robot
+
+        # Planning to a target
+        print("============ Generating plan 1")
+
+        # goal point
+        group.set_pose_target(self.goal)
+
+        # plan
+        plan1 = group.plan()
+        rospy.sleep(10)
+
+        group.execute(plan1)
+        moveit_commander.roscpp_shutdown()
+
+
+
