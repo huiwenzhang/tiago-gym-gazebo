@@ -28,3 +28,17 @@ register(
     max_episode_steps=1000,
     reward_threshold=4.1,
 )
+
+register(
+    id='TiagoReach-v0',
+    entry_point='gym_gazebo_ros.envs.tiago_robot:TiagoReachEnv',
+    max_episode_steps=1000,
+    reward_threshold=4.1,
+)
+
+register(
+    id='TiagoPick-v0',
+    entry_point='gym_gazebo_ros.envs.tiago_robot:TiagoPickEnv',
+    max_episode_steps=1000,
+    reward_threshold=4.1,
+)

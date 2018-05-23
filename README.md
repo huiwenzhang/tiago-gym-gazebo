@@ -1,4 +1,4 @@
-# tiago-gym-gazebo
+# Tiago-gym-gazebo
 A TIAGo environment used for manipulation tasks learning based on ros and openai gym
 
 # Usage
@@ -17,7 +17,7 @@ env.render()
 ```
 
 
-4. training examples
+4. Training examples
 
 ```sh
 python3 examples/agents/assembler_pih_ddpg.py --env-id "Tiago-v0" --nb-rollout-steps 1000
