@@ -1,5 +1,6 @@
-# Plan arm to goal pose with traditional plan method
+#!/usr/bin/env python3
 
+# Plan arm to goal pose with traditional plan method
 import gym
 
 

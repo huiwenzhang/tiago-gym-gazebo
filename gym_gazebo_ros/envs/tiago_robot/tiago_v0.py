@@ -7,6 +7,8 @@ from gym import error, spaces, utils
 from gym.utils import seeding
 from . import ros_general_utils as ros_utils # custom user defined ros utils
 from numpy.linalg import inv, norm
+import subprocess, os
+from gym_gazebo_ros.envs import gazebo_env
 
 # ros related data structure
 from geometry_msgs.msg import Twist, WrenchStamped, Pose, PoseStamped
@@ -33,23 +35,16 @@ from play_motion_msgs.msg import PlayMotionAction, PlayMotionGoal
 
 
 
-class TiagoEnv(gym.Env):
-    metadata = {'render.modes': ['human']}
+class TiagoEnv(gazebo_env.GazeboEnv):
 
-    def __init__(self, init_node=True):
-        """Initialized Tiago robot Env
-        init_node:   Whether or not to initialize a new ROS node.
+    def __init__(self):
         """
-
-        if init_node:
-            # if not init a ros node, we can use the ros topic related method, such as rospy.wait_for_message()
-            rospy.init_node('gym_ros_pick_node')
-            print('initialize ros node for learning pick and place task')
+        Initialized Tiago robot Env
+        """
+        super(TiagoEnv, self).__init__()
 
 
         self.__robot_name = rospy.get_param("/robot_name")    # steel/titanium
-
-
         rospy.wait_for_service("/gazebo/reset_world", 10.0)
         self.__reset_world = rospy.ServiceProxy("/gazebo/reset_world", Empty)
         rospy.wait_for_service("/gazebo/get_model_state", 10.0)
@@ -456,25 +451,6 @@ class TiagoEnv(gym.Env):
 
         # (needed by gym) return the initial observation or state
         return np.array(state)
-
-    def _render(self, mode='human', close=False):
-        """Send state to plot in the window. This is not needed by gazebo env.
-
-        Args:
-            mode (str): render mode. 'human' for no render on the window
-            close (bool): True for close the window, False for keep open
-
-        Returns:
-            return_type: return nothing.
-
-        Raises:
-            AttributeError: xxx
-            ValueError: xxx
-        """
-        if close:
-            return
-        # if not close, we print the process data, such as steps of epoch (epoch index)
-        # print(">> Step ", self.epoch_idx, "best validation:", self.best_val)
 
 
     def _reset_world_scene(self):
@@ -1017,6 +993,8 @@ class TiagoEnv(gym.Env):
         goal_pose.header = header
 
         self.cartesian_plan(goal_pose)
+
+
 
 
 

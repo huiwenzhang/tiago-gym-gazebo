@@ -7,6 +7,7 @@ from gym import error, spaces, utils
 from gym.utils import seeding
 from . import ros_general_utils as ros_utils # custom user defined ros utils
 from numpy.linalg import inv, norm
+from gym_gazebo_ros.envs.gazebo_env import GazeboEnv
 
 # ros related data structure
 from geometry_msgs.msg import Twist, WrenchStamped, Pose, PoseStamped
@@ -31,7 +32,8 @@ from controller_manager_msgs.srv import SwitchController, SwitchControllerReques
 from urdf_parser_py.urdf import URDF
 from play_motion_msgs.msg import PlayMotionAction, PlayMotionGoal
 
-
+# numpy array output format
+np.set_printoptions(precision=3, suppress=True)
 
 # from PyKDL import Jacobian, Chain, ChainJntToJacSolver, JntArray # For KDL Jacobians
 
@@ -41,30 +43,12 @@ from play_motion_msgs.msg import PlayMotionAction, PlayMotionGoal
 # about learning here!
 
 
-class TiagoReachEnv(gym.Env):
-    metadata = {'render.modes': ['human']}
-
-    def __init__(self, init_node=True):
-        """Initialized Tiago robot Env
-        init_node:   Whether or not to initialize a new ROS node.
-        """
-        # (needed by gazebo_ros) ros packages out of this source, 
-        # we should make sure that we have launch the simulation using external launch file.
-
-        # (needed by gazebo_ros)Setup the main node, if we call this from outside, 
-        # we may set init_node=False to disable generate a new node.
-        if init_node:
-            # if not init a ros node, we can use the ros topic related method, such as rospy.wait_for_message()
-            rospy.init_node('gym_ros_node')
-            print('initialize ros node')
-
-        # self.__joint_state_sub = rospy.Subscriber("/joint_states", JointState,
-        #                                           self.__joint_state_cb, queue_size=1)
+class TiagoReachEnv(GazeboEnv):
+    def __init__(self):
+        super(TiagoReachEnv, self).__init__()
 
 
         self.__robot_name = rospy.get_param("/robot_name")    # steel/titanium
-
-
         rospy.wait_for_service("/gazebo/reset_world", 10.0)
         self.__reset_world = rospy.ServiceProxy("/gazebo/reset_world", Empty)
         rospy.wait_for_service("/gazebo/get_model_state", 10.0)
@@ -188,6 +172,7 @@ class TiagoReachEnv(gym.Env):
         # here we know is:
         # ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
         # we follow this order in joint velocity controller and joint state publisher
+
         print("joints controlled in this demo is: {}".format(self.__arm_joint_names))
 
 
@@ -239,7 +224,7 @@ class TiagoReachEnv(gym.Env):
         self.lock = Lock()
         self.contact_flag_released = True
         self.contact_flag = False
-        self.tolerance = 1e-3 # reaching error threshold
+        self.tolerance = 1e-2 # reaching error threshold
 
         # self.max_episode_steps = 10000 # only used for some algorithm, thi is complicated?
 
@@ -285,17 +270,11 @@ class TiagoReachEnv(gym.Env):
     def _step(self, action):
         """
         Perform some action in the environment
-
         action: depend on the action space setting
-
         Return:  state, reward, and done status in this function
-
         The action command comes from an agent, which is an algorithm used for making decision
         """
-        # if not self._valid_action_check(action):
-        #     print("=======================Step: {}, current action is not valid, try next one".format(self.time_step_index))
-        #     self.time_step_index += 1
-        #     return np.array(self.state), 0, False, {}
+        action = self._action_clip(action) # should we used incremental command for a?
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
@@ -303,78 +282,57 @@ class TiagoReachEnv(gym.Env):
         except (rospy.ServiceException) as e:
             print("/gazebo/unpause_physics service call failed")
 
+        # position clip
+        action = np.clip(action, self.action_lower, self.action_upper).tolist()
+        # positions_point = np.clip(action + np.array(joint_data.position),self.__joint_limits_lower, self.__joint_limits_upper)
 
-        self.lock.acquire() # acquire thread to main the current shared buffer
-        contact_flag = self.contact_flag
-        contact_flag_released = self.contact_flag_released
-        self.lock.release()
+        print("new action: {}".format(np.array(action)))
 
-        if contact_flag_released is False:
-            if contact_flag is True:
-                state, abs_pos,  joint_position, joint_vel = self._get_obs()
-                # stop move
-                rospy.loginfo("==== release contact state...")
+        try:
+            # TODO: actually our action should consider the robot joint limit (including velocity limit)
+            # TODO: add action prediction and corresponding terminate condition prediction before take excution
+            # TODO: limit action (position translocation), keep every step have a very small moving.
+            # we use joint position increment to send to robot
 
-                self.zero_velocity_stop()
+            # Control with topic
+            # goal = JointTrajectory()
+            # point = JointTrajectoryPoint()
+            # point.positions = action
+            # point.velocities = [0]*len(action)
+            # point.time_from_start = rospy.Duration(self.control_period)
+            # goal.points.append(point)
+            # goal.joint_names = self.__joint_names_order
+            # self.arm_vel_publisher.publish(goal)
 
-                # pause the simulation
-                rospy.loginfo("==== pause physics for contact")
-                rospy.wait_for_service('/gazebo/pause_physics')
-                try:
-                    self.__pause_physics()
-                except (rospy.ServiceException) as exc:
-                    print("/gazebo/pause_physics service call failed:" + str(exc))
-        else:
-            try:
-                # TODO: actually our action should consider the robot joint limit (including velocity limit)
-                # TODO: add action prediction and corresponding terminate condition prediction before take excution
-                # TODO: limit action (position translocation), keep every step have a very small moving. 
-                # we use joint position increment to send to robot
-                action = np.clip(action, self.action_lower, self.action_upper).tolist()
-                # positions_point = np.clip(action + np.array(joint_data.position),self.__joint_limits_lower, self.__joint_limits_upper)
-                print("============new action is : {}".format(action))
+            # Control with action client
+            self.__arm_joint_traj_client.wait_for_server()
+            rospy.loginfo('connected to robot arm controller server')
 
-
-                # Control with topic
-                # goal = JointTrajectory()
-                # point = JointTrajectoryPoint()
-                # point.positions = action
-                # point.velocities = [0]*len(action)
-                # point.time_from_start = rospy.Duration(self.control_period)
-                # goal.points.append(point)
-                # goal.joint_names = self.__joint_names_order
-                # self.arm_vel_publisher.publish(goal)
-
-                # Control with action client
-                self.__arm_joint_traj_client.wait_for_server()
-                rospy.loginfo('connected to robot arm controller server')
-
-                g = FollowJointTrajectoryGoal()
-                g.trajectory = JointTrajectory()
-                g.trajectory.joint_names = self.__arm_joint_names
-                g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0]*len(action), time_from_start=rospy.Duration(self.control_period))]
-                self.__arm_joint_traj_client.send_goal(g)
-                rospy.loginfo('send position to robot arm')
+            g = FollowJointTrajectoryGoal()
+            g.trajectory = JointTrajectory()
+            g.trajectory.joint_names = self.__arm_joint_names
+            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0]*len(action), time_from_start=rospy.Duration(self.control_period))]
+            self.__arm_joint_traj_client.send_goal(g)
+            rospy.loginfo('send position to robot arm')
 
 
-                # bug? wait for result blocking!
-                # self.__arm_joint_traj_client.wait_for_result()
-                time.sleep(self.control_period)
-                rospy.loginfo('Execute velocity control for one step')
-                result = self.__arm_joint_traj_client.get_state()
-                rospy.loginfo('task done with state: ' + self._get_states_string(result))
-
-            except KeyboardInterrupt:
-                self.__arm_joint_traj_client.cancel_goal()
+            # bug? wait for result blocking!
+            # self.__arm_joint_traj_client.wait_for_result()
+            time.sleep(self.control_period)
+            rospy.loginfo('Execute velocity control for one step')
+            result = self.__arm_joint_traj_client.get_state()
+            rospy.loginfo('task done with state: ' + self._get_states_string(result))
+        except KeyboardInterrupt:
+            self.__arm_joint_traj_client.cancel_goal()
 
         # get joint data.
-        state, abs_pos, joint_position, joint_vel = self._get_obs()
+        state, abs_pos, joint_pos, joint_vel = self._get_obs()
 
 
         # TODO: add get the filtered force sensor data
         self.state = state
-        self.joint_pos = joint_position
-        # current_jacobian = self._get_jacobian(joint_position)
+        self.joint_pos = joint_pos
+        # current_jacobian = self._get_jacobian(joint_pos)
 
         # (needed by gym )done is the terminate condition. We should
         # return this value by considering the terminal condition.
@@ -383,9 +341,6 @@ class TiagoReachEnv(gym.Env):
         done = self.is_task_done(state, joint_vel)
 
 
-
-        rospy.loginfo('maximum pisode step is {}, current time step index is {}'.format(self.spec.timestep_limit, self.time_step_index))
-
         # TODO: add jacobian cost as part of reward, like GPS, which can avoid the robot explore the sigularity position.
         #  Also can add joint torque as part of reward, like GPS. 
         # reward = max(0.0, 1.5 - 0.01*norm(np.array(end_pose_dist))**2)
@@ -393,9 +348,7 @@ class TiagoReachEnv(gym.Env):
         distance = np.sqrt( np.sum(np.array(end_pose_dist[:3])**2) + ros_utils.distance_of_quaternion(end_pose_dist[3:7])**2 )
         # TODO: we should add safety bounds information to reward, not only terminate condition,like some paper!
         reward = max(0.0, 2.0 - distance)
-
-        print("===================reward is: {}==============================".format(reward))
-        print("===================distance is : {}===========================".format(distance))
+        print("=================step: %d, reward : %.3f, current dist: %.3f"  %(self.time_step_index, reward, distance))
 
         # (needed by gym) we should return the state(or observation from state(function of state)), reward, and done status.
         # If the task completed, such as distance to target is d > = 0.001,
@@ -414,17 +367,22 @@ class TiagoReachEnv(gym.Env):
         action = np.array(action)
         pos_upper = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_upper) * self.control_period
         pos_lower = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_lower) * self.control_period
-        return  True if np.all(action <= pos_upper) and np.all(action >= pos_lower) else False
+        return True if np.all(action <= pos_upper) and np.all(action >= pos_lower) else False
 
-
-    def zero_velocity_stop(self):
-        # used for velocity control
-        # TODO:implement velocity controller later (use position controller and velocity controller)
-        vel_msg = Float64MultiArray()
-
-        vel_msg.data = [0.0] *6
-
-        self.arm_vel_publisher.publish(vel_msg)
+    def _action_clip(self, action):
+        """
+        If action is beyond the current reaching goal, clip the action with the max velocity constraints
+        :param action: original action value
+        :return: clipped action value
+        """
+        action = np.array(action)
+        safe_coef = 0.4
+        pos_upper = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_upper) * self.control_period * safe_coef
+        pos_lower = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_lower) * self.control_period * safe_coef
+        if not (np.all(action <= pos_upper) and np.all(action >= pos_lower)):
+            print("Invalid value, return clipped value")
+            action = np.clip(action, pos_lower, pos_upper)
+        return action
 
 
     def _get_obs(self):
@@ -441,7 +399,7 @@ class TiagoReachEnv(gym.Env):
 
         # get joint position and velocity
         idx = [i for i, x in enumerate(joint_data.name) if x in self.__arm_joint_names]
-        joint_position = [joint_data.position[i] for i in idx]
+        joint_pos = [joint_data.position[i] for i in idx]
         joint_vel = [joint_data.velocity[i] for i in idx]
 
         # get end-effector position and distance to target and end-effector velocity
@@ -463,7 +421,7 @@ class TiagoReachEnv(gym.Env):
 
         state =  ee_relative_pose + force_data
 
-        return state, ee_abs_pos, joint_position, joint_vel
+        return state, ee_abs_pos, joint_pos, joint_vel
 
 
     def _reset(self, random=False):
@@ -515,29 +473,11 @@ class TiagoReachEnv(gym.Env):
         state, abs_pos, joint_pos, joint_vel = self._get_obs()
         self.state = state
         self.joint_pos = joint_pos
-        self.time_step_index = 0
+        # self.time_step_index = 0
 
         # (needed by gym) return the initial observation or state
         return np.array(state)
 
-    def _render(self, mode='human', close=False):
-        """Send state to plot in the window. This is not needed by gazebo env.
-
-        Args:
-            mode (str): render mode. 'human' for no render on the window
-            close (bool): True for close the window, False for keep open
-
-        Returns:
-            return_type: return nothing.
-
-        Raises:
-            AttributeError: xxx
-            ValueError: xxx
-        """
-        if close:
-            return
-        # if not close, we print the process data, such as steps of epoch (epoch index)
-        # print(">> Step ", self.epoch_idx, "best validation:", self.best_val)
 
 
     def _reset_world_scene(self):
@@ -776,13 +716,13 @@ class TiagoReachEnv(gym.Env):
         rospy.wait_for_service('/gazebo/get_link_state')
 
         if self.__robot_name == 'steel':
-            print('End effector is a gripper...')
+            # print('End effector is a gripper...')
             try:
-                end_state = self.__get_link_pose_srv.call('tiago_steel::gripper_grasp_link', "base_footprint").link_state
+                end_state = self.__get_link_pose_srv.call('tiago_steel::arm_7_link', "base_footprint").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
         else:
-            print('End effector is a 5 finger hand....')
+            # print('End effector is a 5 finger hand....')
             try:
                 end_state = self.__get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
             except (rospy.ServiceException) as exc:
@@ -852,7 +792,10 @@ class TiagoReachEnv(gym.Env):
                                               modelState.pose.orientation.z, modelState.pose.orientation.w])
         Translation = [modelState.pose.position.x, modelState.pose.position.y, modelState.pose.position.z]
         target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
-        return target_pose, modelState.pose
+
+        hand_pose = modelState.pose # different from the target pose
+        hand_pose.position.x = x - 0.1
+        return target_pose, hand_pose
 
 
     def is_task_done(self, state, joint_vel):
@@ -878,7 +821,7 @@ class TiagoReachEnv(gym.Env):
         #     return True
 
         if np.any(np.greater(np.fabs(joint_vel), self.__joint_vel_limits_upper)):
-            print('==========robot joint velocity exceed the joint velocity limit')
+            print('robot joint velocity exceed the joint velocity limit')
             return True
 
         self.lock.acquire()
@@ -898,35 +841,15 @@ class TiagoReachEnv(gym.Env):
         epsilon = self.tolerance
 
         # early terminate the trial process, because the wrong direction
-        if task_translation_error <= 0.03 and task_rotation_error > 0.1:
+        done_condition1 = task_translation_error <= 0.03 and task_rotation_error > 0.1
+        # task finished successfully
+        done_condition2 = task_translation_error <= epsilon and task_rotation_error <= 200 * epsilon
+
+        if done_condition1:
+            print("Early termination for wrong policy")
             return True
-        else:
-            return False
-
-        if task_translation_error <= epsilon and task_rotation_error <= 200 * epsilon:
-            return True
-        else:
-            return False
-
-    def _contain_point(self, bound_pts, end_pos):
-        new_pts = np.zeros(bound_pts.shape)
-
-        for i in range(1, 8):
-            new_pts[i] = bound_pts[i] - bound_pts[0]
-
-        square_bound_pts = np.zeros((3,2))
-        square_bound_pts[0][0] = min(new_pts[:,0])
-        square_bound_pts[0][1] = max(new_pts[:,0])
-        square_bound_pts[1][0] = min(new_pts[:,1])
-        square_bound_pts[1][1] = max(new_pts[:,1])
-        square_bound_pts[2][0] = min(new_pts[:,2])
-        square_bound_pts[2][1] = max(new_pts[:,2])
-
-        end_new = end_pos - bound_pts[0]
-
-        if square_bound_pts[0][0] <= end_new[0] <= square_bound_pts[0][1] and \
-           square_bound_pts[1][0] <= end_new[1] <= square_bound_pts[1][1] and \
-           square_bound_pts[2][0] <= end_new[2] <= square_bound_pts[2][1]:
+        elif done_condition2:
+            print("Task is over, goal reached")
             return True
         else:
             return False
@@ -993,13 +916,13 @@ class TiagoReachEnv(gym.Env):
 
         joint_names = ['elbow_joint', 'shoulder_lift_joint', 'shoulder_pan_joint',
         'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
-        joint_positions = [-1.8220516691974549, 0.5562956844532536, 0.23514608713011054, 0.40291452827333263, 0.24649587287350094, 2.7958636338450624]
+        joint_pos = [-1.8220516691974549, 0.5562956844532536, 0.23514608713011054, 0.40291452827333263, 0.24649587287350094, 2.7958636338450624]
 
         time.sleep(1)
         return_status = self.__set_model.call(model_name="robot", 
                               urdf_param_name="robot_description",
                               joint_names=joint_names, 
-                              joint_positions=joint_positions)
+                              joint_positions=joint_pos)
         rospy.loginfo("set model config %s", return_status)
         print("set robot model successfully!")
 
@@ -1103,13 +1026,13 @@ class TiagoReachEnv(gym.Env):
         # self.__reset_world()
 
         joint_names = self.__arm_joint_names
-        joint_positions = [0.21, -0.2, -2.2, 1.15, -1.57, 0.2, 0.0]
+        joint_pos = [0.21, -0.2, -2.2, 1.15, -1.57, 0.2, 0.0]
 
         time.sleep(1)
         return_status = self.__set_model.call(model_name='tiago_'+self.__robot_name,
                                               urdf_param_name="robot_description",
                                               joint_names=joint_names,
-                                              joint_positions=joint_positions)
+                                              joint_positions=joint_pos)
         rospy.loginfo("set model config %s", return_status)
         print("set robot model successfully!")
 
@@ -1124,6 +1047,7 @@ class TiagoReachEnv(gym.Env):
         self.__switch_ctrl.call(start_controllers=["arm_controller"],
                                 stop_controllers=[],
                                 strictness=SwitchControllerRequest.BEST_EFFORT)
+
 
     def reach_to_point(self):
         """
