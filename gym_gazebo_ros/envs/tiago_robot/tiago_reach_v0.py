@@ -47,59 +47,15 @@ class TiagoReachEnv(GazeboEnv):
     def __init__(self):
         super(TiagoReachEnv, self).__init__()
 
-
-        self.__robot_name = rospy.get_param("/robot_name")    # steel/titanium
-        rospy.wait_for_service("/gazebo/reset_world", 10.0)
-        self.__reset_world = rospy.ServiceProxy("/gazebo/reset_world", Empty)
-        rospy.wait_for_service("/gazebo/get_model_state", 10.0)
-        self.__get_pose_srv = rospy.ServiceProxy(
-            "/gazebo/get_model_state", GetModelState)
-
-        # get the relative state
-        rospy.wait_for_service("/gazebo/get_link_state", 10.0)
-        self.__get_link_pose_srv = rospy.ServiceProxy(
-            "/gazebo/get_link_state", GetLinkState)
-        rospy.wait_for_service("/gazebo/pause_physics")
-        self.__pause_physics = rospy.ServiceProxy(
-            "/gazebo/pause_physics", Empty)
-        rospy.wait_for_service("/gazebo/unpause_physics")
-        self.__unpause_physics = rospy.ServiceProxy(
-            "/gazebo/unpause_physics", Empty)
-
-
-        # ??
+        # Controllers
         rospy.wait_for_service("/controller_manager/switch_controller")
         self.__switch_ctrl = rospy.ServiceProxy("/controller_manager/switch_controller", SwitchController)
 
-        rospy.wait_for_service("/gazebo/set_model_configuration")
-        self.__set_model = rospy.ServiceProxy(
-            "/gazebo/set_model_configuration", SetModelConfiguration)
-
-        rospy.wait_for_service("/gazebo/set_model_state")
-        self.__set_model_state = rospy.ServiceProxy(
-            "/gazebo/set_model_state", SetModelState)
-
-
-        rospy.wait_for_service("/gazebo/delete_model")
-        self.__delete_model = rospy.ServiceProxy(
-            "/gazebo/delete_model", DeleteModel)
-        rospy.wait_for_service("/gazebo/spawn_sdf_model")
-        self.__spawn_model = rospy.ServiceProxy(
-            "/gazebo/spawn_sdf_model", SpawnModel)
-
-        print("ROS services setup done...")
 
         # Get parameters from parameter server
         # param_names = rospy.get_param_names() # return a list include all the names in parameter serve
         arm_joint_names = rospy.get_param("/arm_controller/joints")
         print('Getting parameters from parameter server done...')
-
-
-        # use for tasks with contacts
-        # rospy.Subscriber("/robot_fixed_box_bumper", ContactsState, self._robot_fixed_box_contact_callback)
-        # self.lock = Lock()
-        # self.contact_flag_released = True
-        # self.contact_flag = False
 
 
         # Tiago velocity controllers
@@ -108,7 +64,7 @@ class TiagoReachEnv(GazeboEnv):
         self.head_vel_publisher = rospy.Publisher("head_controller/command", JointTrajectory, queue_size=1)
         self.base_vel_publisher = rospy.Publisher("mobile_base_controller/cmd_vel", Twist, queue_size=1)
 
-        if self.__robot_name == 'titanium':
+        if self.robot_name == 'titanium':
             self.hand_vel_publisher = rospy.Publisher("hand_controller/command", JointTrajectory, queue_size=1)
         else:
             self.hand_vel_publisher = rospy.Publisher("gripper_controller/command", JointTrajectory, queue_size=1)
@@ -127,7 +83,7 @@ class TiagoReachEnv(GazeboEnv):
 
         self.__play_motion_client = actionlib.SimpleActionClient('/play_motion', PlayMotionAction)
 
-        if self.__robot_name == 'titanium':
+        if self.robot_name == 'titanium':
             self.__hand_joint_traj_client = actionlib.SimpleActionClient('/hand_controller/follow_joint_trajectory',
                                                                          FollowJointTrajectoryAction)
         else:
@@ -194,7 +150,7 @@ class TiagoReachEnv(GazeboEnv):
         self.low_state = np.array(self.ee_relative_pose_lower)
         self.high_state = np.array(self.ee_relative_pose_upper)
 
-        if self.__robot_name == 'titanium':
+        if self.robot_name == 'titanium':
             self.force_sensor_lower = [-np.inf]*6
             self.force_sensor_upper = [np.inf]*6
         else:
@@ -269,16 +225,17 @@ class TiagoReachEnv(GazeboEnv):
 
     def _step(self, action):
         """
-        Perform some action in the environment
+        Interact with env with policy learning with RL agent
         action: depend on the action space setting
         Return:  state, reward, and done status in this function
         The action command comes from an agent, which is an algorithm used for making decision
         """
+        # Clip by veloctiy
         action = self._action_clip(action) # should we used incremental command for a?
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as e:
             print("/gazebo/unpause_physics service call failed")
 
@@ -407,7 +364,7 @@ class TiagoReachEnv(GazeboEnv):
         ee_relative_pose, ee_abs_pos = self.get_ee_state()
 
         # get wrist force sensor data if titanium robot is used
-        if self.__robot_name == 'titanium':
+        if self.robot_name == 'titanium':
             force_data_msg = None
             while force_data_msg is None:
                 rospy.loginfo('try to receive force sensor data...')
@@ -431,39 +388,17 @@ class TiagoReachEnv(GazeboEnv):
         # reset arm position
         print("=====================================================================================================\n")
         rospy.loginfo('reset environment...')
-        # reset world first time(first stage)
-        # self._reset_world_scene() # commented for test
-
-        # add following to test
 
         # reset robot first stage
-        # self.spawn_dynamic_reaching_goal('ball')
-        # self._reset_arm_pose_with_play_motion()
+        self.reset_world()
         self.ee_target_pose, self.goal =  self.spawn_dynamic_reaching_goal('ball', random)
         self._virtual_reset_arm_config()
-        # self._reset_hand_pose()
 
         # self._reset_hand_pose() # no hand, so deprecated
 
-        # reset the manipulation objects and robot arm
-        # self._reset_object_pose(self.__current_object)
 
         time.sleep(0.2)
 
-        # we should reset again (second stage)
-        # reset world second time
-        # self._reset_world_scene()   # commented for test
-        # reset robot
-        # self._reset_robot_arm_pose() # commented for test
-        # self._reset_hand_pose()
-        
-        # reset the manipulation objects and robot arm
-        # self._reset_object_pose(self.__current_object)
-
-        # # switch controller
-        # self.__switch_ctrl.call(stop_controllers=["arm_gazebo_controller"],
-        #                 start_controllers=["joint_group_velocity_controller"],
-        #                     strictness=SwitchControllerRequest.BEST_EFFORT)
         print('===========================================reset done===============================================\n')
 
         # read data to observation
@@ -483,18 +418,18 @@ class TiagoReachEnv(GazeboEnv):
     def _reset_world_scene(self):
         rospy.wait_for_service('/gazebo/pause_physics')
         try:
-            self.__pause_physics()
+            self.pause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/pause_physics service call failed:" + str(exc))
 
         # this will reset the simulation time, and this will affect the ros controllers
         rospy.loginfo("reset world")
-        self.__reset_world()
+        self.reset_world()
 
         # Unpause simulation to make observation
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
@@ -514,7 +449,7 @@ class TiagoReachEnv(GazeboEnv):
         # Unpause simulation to make observation
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
@@ -568,7 +503,7 @@ class TiagoReachEnv(GazeboEnv):
         # Unpause simulation to make observation
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
@@ -651,7 +586,7 @@ class TiagoReachEnv(GazeboEnv):
         model_state_msg.twist.angular.y = model_velocity[4]
         model_state_msg.twist.angular.z = model_velocity[5]
         model_state_msg.reference_frame = reference_frame
-        self.__set_model_state(model_state_msg)
+        self.set_model_state(model_state_msg)
 
 
     def __start_ctrl(self):
@@ -673,7 +608,7 @@ class TiagoReachEnv(GazeboEnv):
         # pause simulation 
         rospy.wait_for_service('/gazebo/pause_physics')
         try:
-            self.__pause_physics()
+            self.pause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/pause_physics service call failed:" + str(exc))
 
@@ -699,7 +634,7 @@ class TiagoReachEnv(GazeboEnv):
         # unpause simulation
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
@@ -715,16 +650,16 @@ class TiagoReachEnv(GazeboEnv):
         """
         rospy.wait_for_service('/gazebo/get_link_state')
 
-        if self.__robot_name == 'steel':
+        if self.robot_name == 'steel':
             # print('End effector is a gripper...')
             try:
-                end_state = self.__get_link_pose_srv.call('tiago_steel::arm_7_link', "base_footprint").link_state
+                end_state = self.get_link_pose_srv.call('tiago_steel::arm_7_link', "base_footprint").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
         else:
             # print('End effector is a 5 finger hand....')
             try:
-                end_state = self.__get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
+                end_state = self.get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
         
@@ -763,7 +698,7 @@ class TiagoReachEnv(GazeboEnv):
         # stop simulation
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
@@ -786,7 +721,7 @@ class TiagoReachEnv(GazeboEnv):
             modelState.pose.position.y = y
             modelState.pose.position.z = z
 
-        self.__set_model_state(modelState)
+        self.set_model_state(modelState)
 
         Rotation = tf3d.quaternions.quat2mat([modelState.pose.orientation.x, modelState.pose.orientation.y,
                                               modelState.pose.orientation.z, modelState.pose.orientation.w])
@@ -904,14 +839,14 @@ class TiagoReachEnv(GazeboEnv):
 
         rospy.wait_for_service('/gazebo/pause_physics')
         try:
-            self.__pause_physics()
+            self.pause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/pause_physics service call failed:" + str(exc))
 
 
         # reset world firstly
         rospy.loginfo("reset world")
-        self.__reset_world()
+        self.reset_world()
 
 
         joint_names = ['elbow_joint', 'shoulder_lift_joint', 'shoulder_pan_joint',
@@ -919,10 +854,10 @@ class TiagoReachEnv(GazeboEnv):
         joint_pos = [-1.8220516691974549, 0.5562956844532536, 0.23514608713011054, 0.40291452827333263, 0.24649587287350094, 2.7958636338450624]
 
         time.sleep(1)
-        return_status = self.__set_model.call(model_name="robot", 
-                              urdf_param_name="robot_description",
-                              joint_names=joint_names, 
-                              joint_positions=joint_pos)
+        return_status = self.set_model.call(model_name="robot",
+                                            urdf_param_name="robot_description",
+                                            joint_names=joint_names,
+                                            joint_positions=joint_pos)
         rospy.loginfo("set model config %s", return_status)
         print("set robot model successfully!")
 
@@ -930,7 +865,7 @@ class TiagoReachEnv(GazeboEnv):
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
@@ -1017,7 +952,7 @@ class TiagoReachEnv(GazeboEnv):
 
         rospy.wait_for_service('/gazebo/pause_physics')
         try:
-            self.__pause_physics()
+            self.pause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/pause_physics service call failed:" + str(exc))
 
@@ -1029,10 +964,10 @@ class TiagoReachEnv(GazeboEnv):
         joint_pos = [0.21, -0.2, -2.2, 1.15, -1.57, 0.2, 0.0]
 
         time.sleep(1)
-        return_status = self.__set_model.call(model_name='tiago_'+self.__robot_name,
-                                              urdf_param_name="robot_description",
-                                              joint_names=joint_names,
-                                              joint_positions=joint_pos)
+        return_status = self.set_model.call(model_name='tiago_' + self.robot_name,
+                                            urdf_param_name="robot_description",
+                                            joint_names=joint_names,
+                                            joint_positions=joint_pos)
         rospy.loginfo("set model config %s", return_status)
         print("set robot model successfully!")
 
@@ -1040,7 +975,7 @@ class TiagoReachEnv(GazeboEnv):
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
@@ -1058,7 +993,7 @@ class TiagoReachEnv(GazeboEnv):
         """
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
-            self.__unpause_physics()
+            self.unpause_physics()
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
