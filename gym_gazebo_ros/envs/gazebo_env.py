@@ -1,17 +1,17 @@
 import gym
 import rospy
+import numpy as np
+from random import uniform
 #import roslaunch
 import os
 import signal
 import subprocess
-import time
-from os import path
 from std_srvs.srv import Empty
-import random
 
 from gazebo_msgs.srv import GetModelState, GetLinkState, SetModelConfiguration, DeleteModel, SpawnModel, SetModelState
-from gazebo_msgs.msg import ModelState, ContactState, ContactsState
 from controller_manager_msgs.srv import SwitchController, SwitchControllerRequest
+import transforms3d as tf3d
+from geometry_msgs.msg import Pose
 
 class GazeboEnv(gym.Env):
     """Superclass for all Gazebo environments.
@@ -48,9 +48,6 @@ class GazeboEnv(gym.Env):
         self.unpause_physics = rospy.ServiceProxy(
             "/gazebo/unpause_physics", Empty)
 
-        # ??
-        rospy.wait_for_service("/controller_manager/switch_controller")
-        self.switch_ctrl = rospy.ServiceProxy("/controller_manager/switch_controller", SwitchController)
 
         rospy.wait_for_service("/gazebo/set_model_configuration")
         self.set_model = rospy.ServiceProxy(
@@ -69,19 +66,23 @@ class GazeboEnv(gym.Env):
 
         print("ROS services setup done...")
 
+        # initialize a target pose to test. pose is 4*4 matrix
+        print("Initialize a goal point for testing")
+        Rotation = tf3d.euler.euler2mat(0, 0, 0, 'sxyz')
+        Translation = [0.5, -0.1, 1.0]
+        self.ee_target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
+        quat = tf3d.euler.euler2quat(1, 2, 0, 'sxyz')
+        self.goal = Pose()
+        self.goal.position.x = 0.5
+        self.goal.position.y = -0.1
+        self.goal.position.z = 0.9 + uniform(-0.2, 0.2)
+        self.goal.orientation.w = quat[0]
+        self.goal.orientation.x = quat[1]
+        self.goal.orientation.y = quat[2]
+        self.goal.orientation.z = quat[3]
+
         self.gzclient_pid = 0
 
-    def _step(self, action):
-
-        # Implement this method in every subclass
-        # Perform a step in gazebo. E.g. move the robot
-        raise NotImplementedError
-
-
-    def _reset(self):
-
-        # Implemented in subclass
-        raise NotImplementedError
 
     def _render(self, mode="human", close=False):
 

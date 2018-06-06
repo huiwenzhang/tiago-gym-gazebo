@@ -1,8 +1,8 @@
 import gym_gazebo_ros
 import gym
-# env = gym.make('Tiago-v0')
+env = gym.make('Tiago-v0')
 # env = gym.make('TiagoReach-v0')
-env = gym.make('TiagoPick-v0')
+# env = gym.make('TiagoPick-v0')
 env = env.unwrapped
 env.reset()
 env.reach_to_point()
