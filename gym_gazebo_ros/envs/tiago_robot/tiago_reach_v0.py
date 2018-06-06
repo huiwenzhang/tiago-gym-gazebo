@@ -126,15 +126,6 @@ class TiagoReachEnv(TiagoEnv):
             # TODO: limit action (position translocation), keep every step have a very small moving.
             # we use joint position increment to send to robot
 
-            # Control with topic
-            # goal = JointTrajectory()
-            # point = JointTrajectoryPoint()
-            # point.positions = action
-            # point.velocities = [0]*len(action)
-            # point.time_from_start = rospy.Duration(self.control_period)
-            # goal.points.append(point)
-            # goal.joint_names = self.__joint_names_order
-            # self.arm_vel_publisher.publish(goal)
 
             # Control with action client
             self.arm_pos_control_client.wait_for_server()
@@ -275,13 +266,6 @@ class TiagoReachEnv(TiagoEnv):
         # (needed by gym) return the initial observation or state
         return np.array(state)
 
-
-
-    def __start_ctrl(self):
-
-        rospy.loginfo("STARTING CONTROLLERS")
-        self.switch_ctrl.call(start_controllers=["arm_gazebo_controller", "joint_state_controller"],
-                        stop_controllers=[], strictness=1)
 
 
 

@@ -185,7 +185,6 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         return [seed]
 
 
-
     def _step(self, action):
         """
         Perform some action in the environment
