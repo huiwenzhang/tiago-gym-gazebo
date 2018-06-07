@@ -3,14 +3,14 @@ import time
 import numpy as np
 from threading import Timer, Lock
 from gym import error, spaces, utils
-from . import ros_general_utils as ros_utils # custom user defined ros utils
+from . import ros_general_utils as ros_utils  # custom user defined ros utils
 from numpy.linalg import inv, norm
 from gym_gazebo_ros.envs.tiago_robot.tiago_v0 import TiagoEnv
 
 # ros related data structure
 from geometry_msgs.msg import Twist, WrenchStamped, Pose, PoseStamped
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint # Used for publishing UR joint angles.
-from control_msgs.msg import * # control with action interface
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint  # Used for publishing UR joint angles.
+from control_msgs.msg import *  # control with action interface
 from sensor_msgs.msg import LaserScan, JointState
 
 
@@ -27,7 +27,7 @@ np.set_printoptions(precision=3, suppress=True)
 class TiagoReachEnv(TiagoEnv):
     def __init__(self):
         super(TiagoReachEnv, self).__init__()
-        
+
         # resolve for action space and observation space
         self.hand_joint_names = ['hand_thumb_joint', 'hand_index_joint', 'hand_mrl_joint']
         self.ctrl_joint_names = []
@@ -87,17 +87,15 @@ class TiagoReachEnv(TiagoEnv):
         # Translation = [0.466187,  0.428941, 1.418610]
         # self.ee_target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
         self.ee_target_pose, target_pose = self.spawn_dynamic_reaching_goal('ball')
-        self.goal = target_pose # target pose, data type: geometry_msgs.msg.Pose
+        self.goal = target_pose  # target pose, data type: geometry_msgs.msg.Pose
 
         # define the number of time step for every step know the time, then it can compute something
         # depend on the time
         self.contact_flag_released = True
         self.contact_flag = False
-        self.tolerance = 1e-2 # reaching error threshold
+        self.tolerance = 1e-2  # reaching error threshold
         print("finish setup tiago reaching task env.")
 
-
-   
     def _step(self, action):
         """
         Interact with env with policy learning with RL agent
@@ -106,7 +104,7 @@ class TiagoReachEnv(TiagoEnv):
         The action command comes from an agent, which is an algorithm used for making decision
         """
         # Clip by veloctiy
-        action = self._action_clip(action) # should we used incremental command for a?
+        action = self._action_clip(action)  # should we used incremental command for a?
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
@@ -126,7 +124,6 @@ class TiagoReachEnv(TiagoEnv):
             # TODO: limit action (position translocation), keep every step have a very small moving.
             # we use joint position increment to send to robot
 
-
             # Control with action client
             self.arm_pos_control_client.wait_for_server()
             rospy.loginfo('connected to robot arm controller server')
@@ -134,10 +131,9 @@ class TiagoReachEnv(TiagoEnv):
             g = FollowJointTrajectoryGoal()
             g.trajectory = JointTrajectory()
             g.trajectory.joint_names = self.ctrl_joint_names
-            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0]*len(action), time_from_start=rospy.Duration(self.control_period))]
+            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0] * len(action), time_from_start=rospy.Duration(self.control_period))]
             self.arm_pos_control_client.send_goal(g)
             rospy.loginfo('send position to robot arm')
-
 
             # bug? wait for result blocking!
             # self.arm_pos_control_client.wait_for_result()
@@ -151,7 +147,6 @@ class TiagoReachEnv(TiagoEnv):
         # get joint data.
         state, abs_pos, joint_pos, joint_vel = self._get_obs()
 
-
         # TODO: add get the filtered force sensor data
         self.state = state
         self.joint_pos = joint_pos
@@ -159,19 +154,18 @@ class TiagoReachEnv(TiagoEnv):
 
         # (needed by gym )done is the terminate condition. We should
         # return this value by considering the terminal condition.
-        # TODO:  timestep stop set in max_episode_steps when register this env. 
+        # TODO:  timestep stop set in max_episode_steps when register this env.
         # Another is using --nb-rollout-steps in running this env example?
         done = self.is_task_done(state, joint_vel)
 
-
         # TODO: add jacobian cost as part of reward, like GPS, which can avoid the robot explore the sigularity position.
-        #  Also can add joint torque as part of reward, like GPS. 
+        #  Also can add joint torque as part of reward, like GPS.
         # reward = max(0.0, 1.5 - 0.01*norm(np.array(end_pose_dist))**2)
         end_pose_dist = state[:7]
-        distance = np.sqrt( np.sum(np.array(end_pose_dist[:3])**2) + ros_utils.distance_of_quaternion(end_pose_dist[3:7])**2 )
+        distance = np.sqrt(np.sum(np.array(end_pose_dist[:3])**2) + ros_utils.distance_of_quaternion(end_pose_dist[3:7])**2)
         # TODO: we should add safety bounds information to reward, not only terminate condition,like some paper!
         reward = max(0.0, 2.0 - distance)
-        print("=================step: %d, reward : %.3f, current dist: %.3f"  %(self.time_step_index, reward, distance))
+        print("=================step: %d, reward : %.3f, current dist: %.3f" % (self.time_step_index, reward, distance))
 
         # (needed by gym) we should return the state(or observation from state(function of state)), reward, and done status.
         # If the task completed, such as distance to target is d > = 0.001,
@@ -179,7 +173,6 @@ class TiagoReachEnv(TiagoEnv):
         # NOTE: `reward` always depend on done and action, or state, so it always calculated finally.
         self.time_step_index += 1
         return np.array(self.state), reward, done, {}
-
 
     def _action_clip(self, action):
         """
@@ -195,7 +188,6 @@ class TiagoReachEnv(TiagoEnv):
             print("Invalid value, return clipped value")
             action = np.clip(action, pos_lower, pos_upper)
         return action
-
 
     def _get_obs(self):
         """
@@ -231,10 +223,9 @@ class TiagoReachEnv(TiagoEnv):
         else:
             force_data = []
 
-        state =  ee_relative_pose + force_data
+        state = ee_relative_pose + force_data
 
         return state, ee_abs_pos, joint_pos, joint_vel
-
 
     def _reset(self, random=False):
         # we should stop our controllers firstly or send the initial joint angles to robot
@@ -246,7 +237,7 @@ class TiagoReachEnv(TiagoEnv):
 
         # reset robot first stage
         self.reset_world()
-        self.ee_target_pose, self.goal =  self.spawn_dynamic_reaching_goal('ball', random)
+        self.ee_target_pose, self.goal = self.spawn_dynamic_reaching_goal('ball', random)
         self._virtual_reset_arm_config()
 
         # self._reset_hand_pose() # no hand, so deprecated
@@ -266,12 +257,9 @@ class TiagoReachEnv(TiagoEnv):
         # (needed by gym) return the initial observation or state
         return np.array(state)
 
-
-
-
     def get_ee_state(self):
         """Get end effector pose relative to the target.
-        
+
         Return target pose relative to the target.
         """
         rospy.wait_for_service('/gazebo/get_link_state')
@@ -288,8 +276,9 @@ class TiagoReachEnv(TiagoEnv):
                 end_state = self.get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
-        
+
         end_pose_msg = end_state.pose
+
         ee_vel_msg = end_state.twist
 
         ###### start to extract the msg to data ######
@@ -306,15 +295,15 @@ class TiagoReachEnv(TiagoEnv):
         ee_pose_dist_affine = np.dot(inv(end_pose_affine), self.ee_target_pose)
 
         # translate the relative pose affine matrix to list (position, quaternion)
-        ee_translation = ee_pose_dist_affine[:3,3].reshape(-1).tolist()
-        ee_quat = tf3d.quaternions.mat2quat(ee_pose_dist_affine[:3,:3]).tolist()
+        ee_translation = ee_pose_dist_affine[:3, 3].reshape(-1).tolist()
+        ee_quat = tf3d.quaternions.mat2quat(ee_pose_dist_affine[:3, :3]).tolist()
         ee_relative_pose = ee_translation + ee_quat
 
         # form the end-effector twist list
-        ee_velocity = [ee_vel_msg.linear.x, ee_vel_msg.linear.y, ee_vel_msg.linear.z, 
-                        ee_vel_msg.angular.x, ee_vel_msg.angular.y, ee_vel_msg.angular.z]
+        ee_velocity = [ee_vel_msg.linear.x, ee_vel_msg.linear.y, ee_vel_msg.linear.z,
+                       ee_vel_msg.angular.x, ee_vel_msg.angular.y, ee_vel_msg.angular.z]
 
-        return  ee_relative_pose, ee_abs_pos
+        return ee_relative_pose, ee_abs_pos
 
     def spawn_dynamic_reaching_goal(self, model_name, random=False):
         """
@@ -339,9 +328,9 @@ class TiagoReachEnv(TiagoEnv):
         modelState.pose.orientation.w = 1
         modelState.reference_frame = 'world'
         if random:
-            modelState.pose.position.x = x + np.random.sample()*0.6 - 0.3
+            modelState.pose.position.x = x + np.random.sample() * 0.6 - 0.3
             modelState.pose.position.y = y
-            modelState.pose.position.z = z + np.random.sample()*0.6 - 0.3
+            modelState.pose.position.z = z + np.random.sample() * 0.6 - 0.3
         else:
             modelState.pose.position.x = x
             modelState.pose.position.y = y
@@ -354,15 +343,14 @@ class TiagoReachEnv(TiagoEnv):
         Translation = [modelState.pose.position.x, modelState.pose.position.y, modelState.pose.position.z]
         target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
 
-        hand_pose = modelState.pose # different from the target pose
+        hand_pose = modelState.pose  # different from the target pose
         hand_pose.position.x = x - 0.1
         return target_pose, hand_pose
-
 
     def is_task_done(self, state, joint_vel):
 
         # extract end pose distance from state
-        end_pose_dist =  state[:7]
+        end_pose_dist = state[:7]
 
         # TODO: add collision detection to cancel wrong/bad/negative trial!
         # TODO: add end-effector force sensor data to terminate the trial
@@ -414,6 +402,3 @@ class TiagoReachEnv(TiagoEnv):
             return True
         else:
             return False
-
-
-
