@@ -73,76 +73,26 @@ class TiagoEnv(gazebo_env.GazeboEnv):
                                                                       PointHeadAction)
         self.play_motion_client = actionlib.SimpleActionClient('/play_motion', PlayMotionAction)
 
+        # different on end effector setting for gripper and palm
         if self.robot_name == 'titanium':
             self.hand_pos_control_client = actionlib.SimpleActionClient('/hand_controller/follow_joint_trajectory',
                                                                         FollowJointTrajectoryAction)
+            self.ee_link = 'hand_palm_link'
+            self.ee_frame = 'hand_grasping_frame'
         else:
             self.hand_pos_control_client = actionlib.SimpleActionClient('/gripper_controller/follow_joint_trajectory',
                                                                         FollowJointTrajectoryAction)
+            self.ee_link = 'gripper_link'
+            self.ee_frame = 'gripper_grasping_frame'
 
-        # TODO: add objects into the world
-        # This is an empty world, so no ojects need to be reset. We will include this in the future take and place task
 
-        # (needed by gym) define action space, observation space, reward range
-        # using URDF setup action_space and observation space, reward.
         self.robot = URDF.from_parameter_server()
         self.all_joint_names_order = [self.robot.joints[i].name for i in range(len(self.robot.joints))]
 
-        # record non-fixed joints information
-        # ==================only declare joints want to control in the demo, default:arm joints============
-        self.hand_joint_names = ['hand_thumb_joint', 'hand_index_joint', 'hand_mrl_joint']
-        self.ctrl_joint_names = []
-        self.__joint_limits_lower = []
-        self.__joint_limits_upper = []
-        self.__joint_vel_limits_upper = []
-        self.__joint_vel_limits_lower = []
-        self.__joint_force_limits = []
+        ###############################################################################################################
+        ########### set task specific env in child class, initialize action and observation space #####################
+        ###############################################################################################################
 
-        for i, joint in enumerate(self.robot.joints):
-            # choose joint groups, e.g. arm, hand, torso and so on
-            # TODO: control more groups in future work. this demo just consider arm group
-            if joint.joint_type != 'fixed' and (joint.name.startswith('arm') is True):  # skip hand related joints
-                self.ctrl_joint_names.append(joint.name)
-                self.__joint_limits_lower.append(joint.limit.lower) if joint.limit.lower is not None else self.__joint_limits_lower.append(-np.inf)
-                self.__joint_limits_upper.append(joint.limit.upper) if joint.limit.upper is not None else self.__joint_limits_upper.append(np.inf)
-                self.__joint_vel_limits_lower.append(-joint.limit.velocity)
-                self.__joint_vel_limits_upper.append(joint.limit.velocity)
-                self.__joint_force_limits.append(joint.limit.effort)
-
-        print("joints controlled in this demo: {}".format(self.ctrl_joint_names))
-
-        # TODO: change the corresponding items according to your task
-        # position, action is postion command
-        self.control_period = 0.01
-        self.action_lower = np.array(self.__joint_limits_lower)
-        self.action_upper = np.array(self.__joint_limits_upper)
-        self.action_space = spaces.Box(self.action_lower, self.action_upper)
-
-        # (state)observation space: task oriented configuration
-        # for this pick and place task states include robot end effector pose, relative pose to target
-        # default setting: velocity and force info. is disabled
-
-        self.ee_pos_lower = [-np.inf] * 3
-        self.ee_pos_upper = [np.inf] * 3
-        self.ee_relative_pose_lower = [-np.inf] * 3 + [-1] * 4  # position [x,y,z] and quanternion (w,x,y,z)
-        self.ee_relative_pose_upper = [np.inf] * 3 + [1] * 4
-
-        if self.robot_name == 'titanium':
-            # include force info. if titanium is used
-            self.force_sensor_lower = [-np.inf] * 6
-            self.force_sensor_upper = [np.inf] * 6
-        else:
-            self.force_sensor_lower = []
-            self.force_sensor_upper = []
-
-        self.low_full_state = self.ee_relative_pose_lower
-        self.high_full_state = self.ee_relative_pose_upper
-        # self.low_full_state = np.concatenate((self.low_state, self.force_sensor_lower)) # end effector pos, vec and force.
-        # self.high_full_state = np.concatenate((self.high_state, self.force_sensor_upper))
-        self.observation_space = spaces.Box(np.array(self.low_full_state), np.array(self.high_full_state))
-
-        # TODO: change this according to the task
-        self.reward_range = (0, np.inf)
 
         self.state = None  # observation space
         self.joint_pos = None  # current joint position
@@ -152,8 +102,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         self.time_step_index = 0
         self.lock = Lock()
         self.tolerance = 1e-3  # reaching error threshold
-
-        print("finish setup tiago env.")
+        self.control_period = 0.01
+        print("finish setup parent class tiago env.")
 
     def _wait_for_valid_time(self, timeout):
         """
@@ -491,17 +441,19 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         rospy.wait_for_service('/gazebo/get_link_state')
 
         if self.robot_name == 'steel':
-            print('End effector is a gripper...')
+            # print('End effector is a gripper...')
             try:
-                end_state = self.get_link_pose_srv.call('tiago_steel::gripper_grasp_link', "base_footprint").link_state
+                end_state = self.get_link_pose_srv.call('tiago_steel::arm_7_link', "base_footprint").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
         else:
-            print('End effector is a 5 finger hand....')
+            # print('End effector is a 5 finger hand....')
             try:
                 end_state = self.get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
+
+
 
         end_pose_msg = end_state.pose
         ee_vel_msg = end_state.twist
@@ -513,6 +465,28 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         Rotation = tf3d.quaternions.quat2mat(q)
         Translation = [end_pose_msg.position.x, end_pose_msg.position.y, end_pose_msg.position.z]
         end_pose_affine = tf3d.affines.compose(Translation, Rotation, np.ones(3))
+
+        # transform form tool frame to grasp frame
+        if self.robot_name == 'steel':
+            r1 = tf3d.quaternions.quat2mat([-0.5, 0.5, 0.5, 0.5])
+            trans1 = [0, 0, 0.046]
+            arm_tool_affine = tf3d.affines.compose(trans1, r1, np.ones(3))
+            arm_tool_pose = np.dot(end_pose_affine, arm_tool_affine)
+
+            r2 = tf3d.quaternions.quat2mat([0, 0.707, 0, -0.707])
+            trans2 = [0.01, 0, 0]
+            gripper_link_affine = tf3d.affines.compose(trans2, r2, np.ones(3))
+            gripper_pose = np.dot(arm_tool_pose, gripper_link_affine)
+
+            r3 = tf3d.quaternions.quat2mat([0.5, -0.5, 0.5, 0.5])
+            trans3 = [0, 0, -0.12]
+            grasp_link_affine = tf3d.affines.compose(trans3, r3, np.ones(3))
+            end_pose_affine = np.dot(gripper_pose, grasp_link_affine)
+        else:
+            r = tf3d.quaternions.quat2mat([1, 0, 0, 0])
+            trans = [0.13, 0.02, 0]
+            grasp_link_affine = tf3d.affines.compose(trans, r, np.ones(3))
+            end_pose_affine = np.dot(end_pose_affine, grasp_link_affine)
 
         ee_abs_pos = end_pose_affine[:3, 3].reshape(-1).tolist()
 
@@ -607,7 +581,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
                                             joint_positions=joint_positions)
         rospy.loginfo("reset arm state %s", return_status)
 
-        time.sleep(5)
+        time.sleep(3)
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:

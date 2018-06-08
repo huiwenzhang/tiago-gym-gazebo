@@ -24,9 +24,9 @@ from play_motion_msgs.msg import PlayMotionAction, PlayMotionGoal
 np.set_printoptions(precision=3, suppress=True)
 
 
-class TiagoReachEnv(TiagoEnv):
+class TiagoReachV1(TiagoEnv):
     def __init__(self):
-        super(TiagoReachEnv, self).__init__()
+        super(TiagoReachV1, self).__init__()
 
         # resolve for action space and observation space
         self.hand_joint_names = ['hand_thumb_joint', 'hand_index_joint', 'hand_mrl_joint']
@@ -64,16 +64,10 @@ class TiagoReachEnv(TiagoEnv):
 
         self.ee_pos_lower = [-np.inf] * 3
         self.ee_pos_upper = [np.inf] * 3
-        self.ee_relative_pose_lower = [-np.inf] * 3 + [-1] * 4  # position [x,y,z] and quanternion (w,x,y,z)
-        self.ee_relative_pose_upper = [np.inf] * 3 + [1] * 4
+        self.ee_relative_pose_lower = [-np.inf] * 6  # end effector pos and distance to target
+        self.ee_relative_pose_upper = [np.inf] * 6
 
-        if self.robot_name == 'titanium':
-            # include force info. if titanium is used
-            self.force_sensor_lower = [-np.inf] * 6
-            self.force_sensor_upper = [np.inf] * 6
-        else:
-            self.force_sensor_lower = []
-            self.force_sensor_upper = []
+        # force state
 
         self.low_full_state = self.ee_relative_pose_lower
         self.high_full_state = self.ee_relative_pose_upper
@@ -94,7 +88,7 @@ class TiagoReachEnv(TiagoEnv):
         self.contact_flag_released = True
         self.contact_flag = False
         self.tolerance = 1e-2  # reaching error threshold
-        print("finish setup tiago reaching V0 task env.")
+        print("finish setup tiago reaching V1 task env.")
 
     def _step(self, action):
         """
@@ -114,8 +108,6 @@ class TiagoReachEnv(TiagoEnv):
 
         # position clip
         action = np.clip(action, self.action_lower, self.action_upper).tolist()
-        # positions_point = np.clip(action + np.array(joint_data.position),self.__joint_limits_lower, self.__joint_limits_upper)
-
         print("new action: {}".format(np.array(action)))
 
         try:
@@ -131,13 +123,16 @@ class TiagoReachEnv(TiagoEnv):
             g = FollowJointTrajectoryGoal()
             g.trajectory = JointTrajectory()
             g.trajectory.joint_names = self.ctrl_joint_names
-            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0] * len(action), time_from_start=rospy.Duration(self.control_period))]
+            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0] * len(action),
+                                                        time_from_start=rospy.Duration(self.control_period))]
             self.arm_pos_control_client.send_goal(g)
             rospy.loginfo('send position to robot arm')
 
             # bug? wait for result blocking!
             # self.arm_pos_control_client.wait_for_result()
             time.sleep(self.control_period)
+            # pause physics for data processing
+            # self.pause_physics.call()
             rospy.loginfo('Execute velocity control for one step')
             result = self.arm_pos_control_client.get_state()
             rospy.loginfo('task done with state: ' + self._get_states_string(result))
@@ -145,25 +140,18 @@ class TiagoReachEnv(TiagoEnv):
             self.arm_pos_control_client.cancel_goal()
 
         # get joint data.
-        state, abs_pos, joint_pos, joint_vel = self._get_obs()
+        trans, abs_pos, joint_pos, joint_vel = self._get_obs()
 
         # TODO: add get the filtered force sensor data
-        self.state = state
+        self.state = trans + abs_pos
         self.joint_pos = joint_pos
-        # current_jacobian = self._get_jacobian(joint_pos)
 
-        # (needed by gym )done is the terminate condition. We should
-        # return this value by considering the terminal condition.
-        # TODO:  timestep stop set in max_episode_steps when register this env.
-        # Another is using --nb-rollout-steps in running this env example?
-        done = self.is_task_done(state, joint_vel)
+        done = self.is_task_done(self.state, joint_vel)
 
         # TODO: add jacobian cost as part of reward, like GPS, which can avoid the robot explore the sigularity position.
         #  Also can add joint torque as part of reward, like GPS.
         # reward = max(0.0, 1.5 - 0.01*norm(np.array(end_pose_dist))**2)
-        end_pose_dist = state[:7]
-        distance = np.sqrt(np.sum(np.array(end_pose_dist[:3])**2) + ros_utils.distance_of_quaternion(end_pose_dist[3:7])**2)
-        # TODO: we should add safety bounds information to reward, not only terminate condition,like some paper!
+        distance = np.sqrt(np.sum(np.array(trans[:3])**2))
         reward = max(0.0, 2.0 - distance)
         print("=================step: %d, reward : %.3f, current dist: %.3f" % (self.time_step_index, reward, distance))
 
@@ -208,7 +196,7 @@ class TiagoReachEnv(TiagoEnv):
 
         # get end-effector position and distance to target and end-effector velocity
         # end_pose_vel is end effector pose and velocity, ee_absolute_translation is absolute position
-        ee_relative_pose, ee_abs_pos = self.get_ee_state()
+        distance, ee_abs_pos = self.get_ee_state()
 
         # get wrist force sensor data if titanium robot is used
         if self.robot_name == 'titanium':
@@ -223,9 +211,72 @@ class TiagoReachEnv(TiagoEnv):
         else:
             force_data = []
 
-        state = ee_relative_pose + force_data
+        return distance, ee_abs_pos, joint_pos, joint_vel
 
-        return state, ee_abs_pos, joint_pos, joint_vel
+    def get_ee_state(self):
+        """
+        Compute distance between end effector and its absolute position
+        :return:
+        """
+        rospy.wait_for_service('/gazebo/get_link_state')
+
+        if self.robot_name == 'steel':
+            # print('End effector is a gripper...')
+            try:
+                end_state = self.get_link_pose_srv.call('tiago_steel::arm_7_link', "base_footprint").link_state
+            except (rospy.ServiceException) as exc:
+                print("/gazebo/get_link_state service call failed:" + str(exc))
+        else:
+            # print('End effector is a 5 finger hand....')
+            try:
+                end_state = self.get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
+            except (rospy.ServiceException) as exc:
+                print("/gazebo/get_link_state service call failed:" + str(exc))
+
+        end_pose_msg = end_state.pose
+        ee_vel_msg = end_state.twist
+
+        ###### start to extract the msg to data ######
+
+        # translate the pose msg type to numpy.ndarray
+        q = [end_pose_msg.orientation.w, end_pose_msg.orientation.x, end_pose_msg.orientation.y, end_pose_msg.orientation.z]
+        Rotation = tf3d.quaternions.quat2mat(q)
+        Translation = [end_pose_msg.position.x, end_pose_msg.position.y, end_pose_msg.position.z]
+        end_pose_affine = tf3d.affines.compose(Translation, Rotation, np.ones(3))
+
+        # transform form tool frame to grasp frame
+        if self.robot_name == 'steel':
+            r1 = tf3d.quaternions.quat2mat([-0.5, 0.5, 0.5, 0.5])
+            trans1 = [0, 0, 0.046]
+            arm_tool_affine = tf3d.affines.compose(trans1, r1, np.ones(3))
+            arm_tool_pose = np.dot(end_pose_affine, arm_tool_affine)
+
+            r2 = tf3d.quaternions.quat2mat([0, 0.707, 0, -0.707])
+            trans2 = [0.01, 0, 0]
+            gripper_link_affine = tf3d.affines.compose(trans2, r2, np.ones(3))
+            gripper_pose = np.dot(arm_tool_pose, gripper_link_affine)
+
+            r3 = tf3d.quaternions.quat2mat([0.5, -0.5, 0.5, 0.5])
+            trans3 = [0, 0, -0.12]
+            grasp_link_affine = tf3d.affines.compose(trans3, r3, np.ones(3))
+            end_pose_affine = np.dot(gripper_pose, grasp_link_affine)
+        else:
+            r = tf3d.quaternions.quat2mat([1, 0, 0, 0])
+            trans = [0.13, 0.02, 0]
+            grasp_link_affine = tf3d.affines.compose(trans, r, np.ones(3))
+            end_pose_affine = np.dot(end_pose_affine, grasp_link_affine)
+
+        ee_abs_pos = end_pose_affine[:3, 3].reshape(-1).tolist()
+
+        # compute the relative pose to target pose (target frame relative the current frame)
+        target = self.ee_target_pose[:3, 3].reshape(-1)
+        distance = target - ee_abs_pos
+
+        # form the end-effector twist list
+        ee_velocity = [ee_vel_msg.linear.x, ee_vel_msg.linear.y, ee_vel_msg.linear.z,
+                       ee_vel_msg.angular.x, ee_vel_msg.angular.y, ee_vel_msg.angular.z]
+
+        return distance.tolist(), ee_abs_pos
 
     def _reset(self, random=False):
         # we should stop our controllers firstly or send the initial joint angles to robot
@@ -249,14 +300,10 @@ class TiagoReachEnv(TiagoEnv):
 
         # update `state`
         # state = self.discretize_observation(data, 5)
-        state, abs_pos, joint_pos, joint_vel = self._get_obs()
-        self.state = state
+        trans, abs_pos, joint_pos, joint_vel = self._get_obs()
+        self.state = trans + abs_pos
         self.joint_pos = joint_pos
-        # self.time_step_index = 0
-
-        # (needed by gym) return the initial observation or state
-        return np.array(state)
-
+        return np.array(self.state)
 
     def spawn_dynamic_reaching_goal(self, model_name, random=False):
         """
@@ -279,7 +326,7 @@ class TiagoReachEnv(TiagoEnv):
         modelState.pose.orientation.y = 0
         modelState.pose.orientation.z = 0
         modelState.pose.orientation.w = 1
-        modelState.reference_frame = 'world'
+        modelState.reference_frame = 'odom'
         if random:
             modelState.pose.position.x = x + np.random.sample() * 0.6 - 0.3
             modelState.pose.position.y = y
@@ -303,55 +350,18 @@ class TiagoReachEnv(TiagoEnv):
     def is_task_done(self, state, joint_vel):
 
         # extract end pose distance from state
-        end_pose_dist = state[:7]
+        end_pose_dist = state[:3]
 
         # TODO: add collision detection to cancel wrong/bad/negative trial!
         # TODO: add end-effector force sensor data to terminate the trial
-
-        # detect safety bound
-        # is_in_bound = self._contain_point(self.safety_bound_points, end_absolute_translation)
-        # if is_in_bound is False:
-        #     print("=================robot out of box=====================")
-        #     print("=================current end absolute pose is:=========================")
-        #     print(end_absolute_translation)
-        #     return True
-
-        # extract end-effector force sensor data from state
-        force_data = state[7:]
-
-        # if force_data is not None and np.fabs(max(force_data)) > 5 :
-        #     return True
 
         if np.any(np.greater(np.fabs(joint_vel), self.__joint_vel_limits_upper)):
             print('robot joint velocity exceed the joint velocity limit')
             return True
 
-        self.lock.acquire()
-        if self.contact_flag_released is False:
-            return_flag = self.contact_flag
-            print("===========detected the contact!")
-            self.contact_flag_released = True
-            self.lock.release()
-            # pause the simulation?
-            return return_flag
-        else:
-            self.lock.release()
-
         # TODO: deprecated this task error. check task error
-        task_translation_error = norm(np.array(end_pose_dist[:3]))
-        task_rotation_error = ros_utils.distance_of_quaternion(end_pose_dist[3:7])
-        epsilon = self.tolerance
-
-        # early terminate the trial process, because the wrong direction
-        done_condition1 = task_translation_error <= 0.03 and task_rotation_error > 0.1
-        # task finished successfully
-        done_condition2 = task_translation_error <= epsilon and task_rotation_error <= 200 * epsilon
-
-        if done_condition1:
-            print("Early termination for wrong policy")
-            return True
-        elif done_condition2:
-            print("Task is over, goal reached")
+        task_translation_error = norm(np.array(end_pose_dist))
+        if task_translation_error <= self.tolerance:
             return True
         else:
             return False
