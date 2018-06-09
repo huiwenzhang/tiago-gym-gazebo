@@ -4,11 +4,12 @@ import gym
 env = gym.make('TiagoReach-v2')
 # env = gym.make('TiagoPick-v0')
 env = env.unwrapped
+print(env.action_space)
 env.reset()
 # env.reach_to_point()
 for i in range(1000):
     action = env.action_space.sample()
-    action = [0.02*x - 0.01 for x in action]
+    action = [0.01*x - 0.01 for x in action]
     s, r, done, _ = env.step(action)
     if done:
         env.reset()

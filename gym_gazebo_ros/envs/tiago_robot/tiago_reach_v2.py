@@ -56,7 +56,7 @@ class TiagoReachV2(TiagoEnv):
         # position, action is postion command
         self.action_lower = np.array(self.__joint_limits_lower)
         self.action_upper = np.array(self.__joint_limits_upper)
-        self.action_space = spaces.MultiBinary(7)
+        self.action_space = spaces.MultiDiscrete([3] * 7)
 
         # (state)observation space: task oriented configuration
         # for this pick and place task states include robot end effector pose, relative pose to target
@@ -106,11 +106,6 @@ class TiagoReachV2(TiagoEnv):
         print("new action: {}".format(np.array(action)))
 
         try:
-            # TODO: actually our action should consider the robot joint limit (including velocity limit)
-            # TODO: add action prediction and corresponding terminate condition prediction before take excution
-            # TODO: limit action (position translocation), keep every step have a very small moving.
-            # we use joint position increment to send to robot
-
             # Control with action client
             self.arm_pos_control_client.wait_for_server()
             rospy.loginfo('connected to robot arm controller server')
@@ -356,7 +351,7 @@ class TiagoReachV2(TiagoEnv):
 
         # TODO: deprecated this task error. check task error
         task_translation_error = norm(np.array(end_pose_dist))
-        if task_translation_error <= self.tolerance:
+        if task_translation_error <= self.tolerance or task_translation_error >= 0.7:
             return True
         else:
             return False
