@@ -59,8 +59,8 @@ class TiagoReachV1(TiagoEnv):
 
         # TODO: change the corresponding items according to your task
         # position, action is incremental postion command
-        self.action_lower = np.array(self.__joint_vel_lower) * self.control_period * .8
-        self.action_upper = np.array(self.__joint_vel_upper) * self.control_period * .8
+        self.action_lower = np.array(self.__joint_vel_lower) * self.control_period * .5
+        self.action_upper = np.array(self.__joint_vel_upper) * self.control_period * .5
         self.action_space = spaces.Box(self.action_lower, self.action_upper)
 
         # (state)observation space: task oriented configuration
@@ -80,9 +80,8 @@ class TiagoReachV1(TiagoEnv):
         # self.high_full_state = np.concatenate((self.high_state, self.force_sensor_upper))
         self.observation_space = spaces.Box(np.array(self.low_full_state), np.array(self.high_full_state))
 
-        # Initialize a target pose for reaching task
-        self.ee_target_pose, target_pose = self.spawn_dynamic_reaching_goal('ball')
-        self.goal = target_pose  # target pose, data type: geometry_msgs.msg.Pose
+        # Initialize a target pose for reaching task, will be done in reset func.
+
 
         # define the number of time step for every step know the time, then it can compute something
         # depend on the time
@@ -90,6 +89,7 @@ class TiagoReachV1(TiagoEnv):
         self.contact_flag = False
         self.tolerance = 1e-2  # reaching error threshold
         print("finish setup tiago reaching V1 task env.")
+
 
     def _step(self, action):
         """
@@ -99,7 +99,7 @@ class TiagoReachV1(TiagoEnv):
         The action command comes from an agent, which is an algorithm used for making decision
         """
         # Clip by veloctiy
-        action = self._action_clip(action)  # should we used incremental command for a?
+        act_clip, curr_goal = self._action_clip(action)  # should we used incremental command for a?
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
@@ -107,13 +107,12 @@ class TiagoReachV1(TiagoEnv):
         except (rospy.ServiceException) as e:
             print("/gazebo/unpause_physics service call failed")
 
-        # position clip
-        curr_goal = action + self.joint_pos
-        if np.any(curr_goal >= self.__joint_pos_upper) or np.any(curr_goal <= self.__joint_pos_lower):
-            print("joint limits error")
-            curr_goal = np.clip(curr_goal, self.__joint_pos_lower, self.__joint_pos_upper).tolist()
 
-        print("new action: {}".format(np.array(action)))
+        if (action == act_clip).all():
+            print("new action: {}".format(np.array(action)))
+        else:
+            print("new clip action: {}".format(act_clip))
+
 
         try:
 
@@ -149,9 +148,7 @@ class TiagoReachV1(TiagoEnv):
 
         done = self.is_task_done(self.state, joint_vel)
 
-        # TODO: add jacobian cost as part of reward, like GPS, which can avoid the robot explore the sigularity position.
-        #  Also can add joint torque as part of reward, like GPS.
-        # reward = max(0.0, 1.5 - 0.01*norm(np.array(end_pose_dist))**2)
+
         distance = np.sqrt(np.sum(np.array(trans[:3])**2))
         reward = max(0.0, 2.0 - distance)
         print("=================episode: %d, step: %d, reward : %.3f, current dist: %.3f"
@@ -166,15 +163,25 @@ class TiagoReachV1(TiagoEnv):
 
     def _action_clip(self, action):
         """
-        If action is beyond the current reaching goal, clip the action with the max velocity constraints
+        clip action in case of action is beyond of the current reaching range or touching the joint limits
         :param action: original action value
         :return: clipped action value
         """
+        # velocity clip
         action = np.array(action) 
         if  np.any(action >= self.action_upper) or np.any(action <= self.action_lower):
-            print("Invalid value, return clipped value")
-            action = np.clip(action, self.action_lower, self.action_upper)
-        return action
+            print("velocity bound clip")
+            act_clip = np.clip(action, self.action_lower, self.action_upper)
+
+        # position clip
+        curr_joint_pos = np.array(self.joint_pos)
+        curr_goal = act_clip + curr_joint_pos
+        if np.any(curr_goal >= self.__joint_pos_upper) or np.any(curr_goal <= self.__joint_pos_lower):
+            print("joint bound clip")
+            curr_goal = np.clip(curr_goal, self.__joint_pos_lower, self.__joint_pos_upper).tolist()
+            # actually used clipped action, we should use this info. to update our policy
+            act_clip = curr_goal - curr_joint_pos
+        return act_clip, curr_goal
 
     def _get_obs(self):
         """
@@ -317,7 +324,7 @@ class TiagoReachV1(TiagoEnv):
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
-        x = 0.5
+        x = 0.8
         y = -0.1
         z = 1
         modelState = ModelState()
@@ -343,9 +350,27 @@ class TiagoReachV1(TiagoEnv):
         Translation = [modelState.pose.position.x, modelState.pose.position.y, modelState.pose.position.z]
         target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
 
-        hand_pose = modelState.pose  # different from the target pose
-        hand_pose.position.x = x - 0.1
-        return target_pose, hand_pose
+        hand2ball_trans = [-0.35, 0.01, 0]
+        hand2ball_rot = tf3d.euler.euler2mat(0, 0, 0)
+        hand2ball_affine = tf3d.affines.compose(hand2ball_trans, hand2ball_rot, np.ones(3))
+        hand_pose_mat = np.dot(target_pose, np.linalg.inv(hand2ball_affine))
+        hand_translation = hand_pose_mat[:3, 3].reshape(-1)
+        hand_quat = tf3d.quaternions.mat2quat(hand_pose_mat[:3, :3]) # quaternion [w, x, y, z]
+        hand_pos = Pose()
+        hand_pos.position.x = hand_translation[0]
+        hand_pos.position.y = hand_translation[1]
+        hand_pos.position.z = hand_translation[2]
+        # hand_pos.orientation.w = hand_quat[0]
+        # hand_pos.orientation.x = hand_quat[1]
+        # hand_pos.orientation.y = hand_quat[2]
+        # hand_pos.orientation.z = hand_quat[3]
+        hand_pos.orientation.w = 1
+        hand_pos.orientation.x = 0
+        hand_pos.orientation.y = 0
+        hand_pos.orientation.z = 0
+        # hand_pose = modelState.pose  # different from the target pose
+        # hand_pose.position.x = x - 0.1
+        return hand_pose_mat, hand_pos
 
     def is_task_done(self, state, joint_vel):
 
@@ -355,14 +380,14 @@ class TiagoReachV1(TiagoEnv):
         # TODO: add collision detection to cancel wrong/bad/negative trial!
         # TODO: add end-effector force sensor data to terminate the trial
 
-        if np.any(np.greater(np.fabs(joint_vel), self.__joint_vel_upper)):
-            print('robot joint velocity exceed the joint velocity limit')
-            return True
+        # if np.any(np.greater(np.fabs(joint_vel), self.__joint_vel_upper)):
+        #     print('DONE, robot joint velocity exceed the joint velocity limit')
+        #     return True
 
         # TODO: deprecated this task error. check task error
         task_translation_error = norm(np.array(end_pose_dist))
-        if task_translation_error <= self.tolerance or task_translation_error >= 1.0:
-            print("too far away from the target")
+        if task_translation_error <= self.tolerance or task_translation_error >= 0.7:
+            print("DONE, too far away from the target")
             return True
         else:
             return False

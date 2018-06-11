@@ -100,10 +100,10 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         # define the number of time step for every step know the time, then it can compute something
         # depend on the time
         self.time_step_index = 0
-        self.current_epi = 1
+        self.current_epi = 0
         self.lock = Lock()
         self.tolerance = 1e-3  # reaching error threshold
-        self.control_period = 0.01
+        self.control_period = 0.03
         print("finish setup parent class tiago env.")
 
     def _wait_for_valid_time(self, timeout):
@@ -573,7 +573,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         # self.__reset_world()
 
         joint_names = self.ctrl_joint_names
-        joint_positions = [0.21, -0.2, -2.2, 1.15, -1.57, 0.2, 0.0]
+        joint_positions = [0.21, -0.7, -1.8, 1.15, 0.0, 0.0, 0.0]
 
         time.sleep(1)
         return_status = self.set_model.call(model_name='tiago_' + self.robot_name,
