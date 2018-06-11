@@ -23,6 +23,11 @@ from play_motion_msgs.msg import PlayMotionAction, PlayMotionGoal
 # numpy array output format
 np.set_printoptions(precision=3, suppress=True)
 
+"""
+Reach task version 1:
+Different from v0 version, reaching the ball without orientation constraits and 
+observation space inlucde ee positon and distance
+"""
 
 class TiagoReachV1(TiagoEnv):
     def __init__(self):
@@ -31,10 +36,10 @@ class TiagoReachV1(TiagoEnv):
         # resolve for action space and observation space
         self.hand_joint_names = ['hand_thumb_joint', 'hand_index_joint', 'hand_mrl_joint']
         self.ctrl_joint_names = []
-        self.__joint_limits_lower = []
-        self.__joint_limits_upper = []
-        self.__joint_vel_limits_upper = []
-        self.__joint_vel_limits_lower = []
+        self.__joint_pos_lower = []
+        self.__joint_pos_upper = []
+        self.__joint_vel_upper = []
+        self.__joint_vel_lower = []
         self.__joint_force_limits = []
 
         for i, joint in enumerate(self.robot.joints):
@@ -42,20 +47,20 @@ class TiagoReachV1(TiagoEnv):
             # TODO: control more groups in future work. this demo just consider arm group
             if joint.joint_type != 'fixed' and (joint.name.startswith('arm') is True):  # skip hand related joints
                 self.ctrl_joint_names.append(joint.name)
-                self.__joint_limits_lower.append(
-                    joint.limit.lower) if joint.limit.lower is not None else self.__joint_limits_lower.append(-np.inf)
-                self.__joint_limits_upper.append(
-                    joint.limit.upper) if joint.limit.upper is not None else self.__joint_limits_upper.append(np.inf)
-                self.__joint_vel_limits_lower.append(-joint.limit.velocity)
-                self.__joint_vel_limits_upper.append(joint.limit.velocity)
+                self.__joint_pos_lower.append(
+                    joint.limit.lower) if joint.limit.lower is not None else self.__joint_pos_lower.append(-np.inf)
+                self.__joint_pos_upper.append(
+                    joint.limit.upper) if joint.limit.upper is not None else self.__joint_pos_upper.append(np.inf)
+                self.__joint_vel_lower.append(-joint.limit.velocity)
+                self.__joint_vel_upper.append(joint.limit.velocity)
                 self.__joint_force_limits.append(joint.limit.effort)
 
         print("joints controlled in this demo: {}".format(self.ctrl_joint_names))
 
         # TODO: change the corresponding items according to your task
-        # position, action is postion command
-        self.action_lower = np.array(self.__joint_limits_lower)
-        self.action_upper = np.array(self.__joint_limits_upper)
+        # position, action is incremental postion command
+        self.action_lower = np.array(self.__joint_vel_lower) * self.control_period * .8
+        self.action_upper = np.array(self.__joint_vel_upper) * self.control_period * .8
         self.action_space = spaces.Box(self.action_lower, self.action_upper)
 
         # (state)observation space: task oriented configuration
@@ -76,10 +81,6 @@ class TiagoReachV1(TiagoEnv):
         self.observation_space = spaces.Box(np.array(self.low_full_state), np.array(self.high_full_state))
 
         # Initialize a target pose for reaching task
-        # TODO: replace this codes later with spawn_dynamic_target func
-        # Rotation = tf3d.euler.euler2mat(0.473038,-1.151761, -0.364322, 'sxyz')
-        # Translation = [0.466187,  0.428941, 1.418610]
-        # self.ee_target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
         self.ee_target_pose, target_pose = self.spawn_dynamic_reaching_goal('ball')
         self.goal = target_pose  # target pose, data type: geometry_msgs.msg.Pose
 
@@ -107,14 +108,14 @@ class TiagoReachV1(TiagoEnv):
             print("/gazebo/unpause_physics service call failed")
 
         # position clip
-        action = np.clip(action, self.action_lower, self.action_upper).tolist()
+        curr_goal = action + self.joint_pos
+        if np.any(curr_goal >= self.__joint_pos_upper) or np.any(curr_goal <= self.__joint_pos_lower):
+            print("joint limits error")
+            curr_goal = np.clip(curr_goal, self.__joint_pos_lower, self.__joint_pos_upper).tolist()
+
         print("new action: {}".format(np.array(action)))
 
         try:
-            # TODO: actually our action should consider the robot joint limit (including velocity limit)
-            # TODO: add action prediction and corresponding terminate condition prediction before take excution
-            # TODO: limit action (position translocation), keep every step have a very small moving.
-            # we use joint position increment to send to robot
 
             # Control with action client
             self.arm_pos_control_client.wait_for_server()
@@ -123,7 +124,7 @@ class TiagoReachV1(TiagoEnv):
             g = FollowJointTrajectoryGoal()
             g.trajectory = JointTrajectory()
             g.trajectory.joint_names = self.ctrl_joint_names
-            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0] * len(action),
+            g.trajectory.points = [JointTrajectoryPoint(positions=curr_goal, velocities=[0] * len(action),
                                                         time_from_start=rospy.Duration(self.control_period))]
             self.arm_pos_control_client.send_goal(g)
             rospy.loginfo('send position to robot arm')
@@ -153,7 +154,8 @@ class TiagoReachV1(TiagoEnv):
         # reward = max(0.0, 1.5 - 0.01*norm(np.array(end_pose_dist))**2)
         distance = np.sqrt(np.sum(np.array(trans[:3])**2))
         reward = max(0.0, 2.0 - distance)
-        print("=================step: %d, reward : %.3f, current dist: %.3f" % (self.time_step_index, reward, distance))
+        print("=================episode: %d, step: %d, reward : %.3f, current dist: %.3f"
+              % (self.current_epi, self.time_step_index, reward, distance))
 
         # (needed by gym) we should return the state(or observation from state(function of state)), reward, and done status.
         # If the task completed, such as distance to target is d > = 0.001,
@@ -168,13 +170,10 @@ class TiagoReachV1(TiagoEnv):
         :param action: original action value
         :return: clipped action value
         """
-        action = np.array(action)
-        safe_coef = 0.4
-        pos_upper = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_upper) * self.control_period * safe_coef
-        pos_lower = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_lower) * self.control_period * safe_coef
-        if not (np.all(action <= pos_upper) and np.all(action >= pos_lower)):
+        action = np.array(action) 
+        if  np.any(action >= self.action_upper) or np.any(action <= self.action_lower):
             print("Invalid value, return clipped value")
-            action = np.clip(action, pos_lower, pos_upper)
+            action = np.clip(action, self.action_lower, self.action_upper)
         return action
 
     def _get_obs(self):
@@ -303,6 +302,7 @@ class TiagoReachV1(TiagoEnv):
         trans, abs_pos, joint_pos, joint_vel = self._get_obs()
         self.state = trans + abs_pos
         self.joint_pos = joint_pos
+        self.current_epi += 1
         return np.array(self.state)
 
     def spawn_dynamic_reaching_goal(self, model_name, random=False):
@@ -326,7 +326,7 @@ class TiagoReachV1(TiagoEnv):
         modelState.pose.orientation.y = 0
         modelState.pose.orientation.z = 0
         modelState.pose.orientation.w = 1
-        modelState.reference_frame = 'odom'
+        modelState.reference_frame = 'world'
         if random:
             modelState.pose.position.x = x + np.random.sample() * 0.6 - 0.3
             modelState.pose.position.y = y
@@ -355,13 +355,14 @@ class TiagoReachV1(TiagoEnv):
         # TODO: add collision detection to cancel wrong/bad/negative trial!
         # TODO: add end-effector force sensor data to terminate the trial
 
-        if np.any(np.greater(np.fabs(joint_vel), self.__joint_vel_limits_upper)):
+        if np.any(np.greater(np.fabs(joint_vel), self.__joint_vel_upper)):
             print('robot joint velocity exceed the joint velocity limit')
             return True
 
         # TODO: deprecated this task error. check task error
         task_translation_error = norm(np.array(end_pose_dist))
-        if task_translation_error <= self.tolerance:
+        if task_translation_error <= self.tolerance or task_translation_error >= 1.0:
+            print("too far away from the target")
             return True
         else:
             return False

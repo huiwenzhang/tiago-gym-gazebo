@@ -12,8 +12,7 @@ from baselines import logger, bench
 import logging
 from baselines.common.misc_util import (
     set_global_seeds,
-    boolean_flag,
-)
+    )
 
 import gym_gazebo_ros
 
@@ -33,6 +32,7 @@ def train(env_id, num_timesteps, seed):
     sess.__enter__()
 
     rank = MPI.COMM_WORLD.Get_rank()
+    # for parallel executing, each process has a rand
     if rank == 0:
         logger.configure()
     else:
@@ -47,9 +47,8 @@ def train(env_id, num_timesteps, seed):
     env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)))
     gym.logger.setLevel(logging.WARN)
 
-    # env = make_mujoco_env(env_id, workerseed)
-    set_global_seeds(seed)
-    env.seed(seed)
+    set_global_seeds(workerseed)
+    env.seed(workerseed)
     trpo_mpi.learn(env, policy_fn, timesteps_per_batch=1024, max_kl=0.01, cg_iters=10, cg_damping=0.1,
         max_timesteps=num_timesteps, gamma=0.99, lam=0.98, vf_iters=5, vf_stepsize=1e-3)
     env.close()

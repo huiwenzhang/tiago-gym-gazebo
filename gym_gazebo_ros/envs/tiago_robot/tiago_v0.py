@@ -100,6 +100,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         # define the number of time step for every step know the time, then it can compute something
         # depend on the time
         self.time_step_index = 0
+        self.current_epi = 1
         self.lock = Lock()
         self.tolerance = 1e-3  # reaching error threshold
         self.control_period = 0.01

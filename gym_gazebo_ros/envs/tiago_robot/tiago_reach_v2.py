@@ -22,9 +22,14 @@ from play_motion_msgs.msg import PlayMotionAction, PlayMotionGoal
 
 # numpy array output format
 np.set_printoptions(precision=3, suppress=True)
+"""
+Reach task version 2:
+discrete version for reaching ball task, three actions -0.01, 0, 0.01 for each joints at every step
+"""
 
 
 class TiagoReachV2(TiagoEnv):
+
     def __init__(self):
         super(TiagoReachV2, self).__init__()
 
@@ -316,7 +321,7 @@ class TiagoReachV2(TiagoEnv):
         modelState.pose.orientation.y = 0
         modelState.pose.orientation.z = 0
         modelState.pose.orientation.w = 1
-        modelState.reference_frame = 'odom'
+        modelState.reference_frame = 'world'
         if random:
             modelState.pose.position.x = x + np.random.sample() * 0.6 - 0.3
             modelState.pose.position.y = y
@@ -351,7 +356,7 @@ class TiagoReachV2(TiagoEnv):
 
         # TODO: deprecated this task error. check task error
         task_translation_error = norm(np.array(end_pose_dist))
-        if task_translation_error <= self.tolerance or task_translation_error >= 0.7:
+        if task_translation_error <= self.tolerance or task_translation_error >= 1.0:
             return True
         else:
             return False

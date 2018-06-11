@@ -11,8 +11,7 @@ from gym import wrappers
 
 import gym_gazebo_ros
 
-env = gym.make('Assembler-v0')
-action = 0.1
+env = gym.make('TiagoReach-v0')
 ob = env.reset()
 print('finish reset')
 env.seed(0)
