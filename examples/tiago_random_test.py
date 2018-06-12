@@ -11,19 +11,18 @@ from gym import wrappers
 
 import gym_gazebo_ros
 
-env = gym.make('TiagoReach-v0')
+env = gym.make('TiagoReach-v1')
 ob = env.reset()
 print('finish reset')
-env.seed(0)
 print('finish seed')
 
 # You provide the directory to write to (can be an existing
 # directory, including one with existing data -- all monitor files
 # will be namespaced). You can also dump to a tempdir if you'd
 # like: tempfile.mkdtemp().
-outdir = '/tmp/random-agent-results'
-env = wrappers.Monitor(env, directory=outdir, force=True)
-env.seed(0)
+# outdir = '/tmp/random-agent-results'
+# env = wrappers.Monitor(env, directory=outdir, force=True)
+# env.seed(0)
 
 episode_count = 100
 reward = 0

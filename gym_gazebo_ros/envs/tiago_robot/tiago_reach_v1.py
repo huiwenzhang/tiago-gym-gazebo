@@ -25,9 +25,10 @@ np.set_printoptions(precision=3, suppress=True)
 
 """
 Reach task version 1:
-Different from v0 version, reaching the ball without orientation constraits and 
+Different from v0 version, reaching the ball without orientation constraits and
 observation space inlucde ee positon and distance
 """
+
 
 class TiagoReachV1(TiagoEnv):
     def __init__(self):
@@ -82,14 +83,12 @@ class TiagoReachV1(TiagoEnv):
 
         # Initialize a target pose for reaching task, will be done in reset func.
 
-
         # define the number of time step for every step know the time, then it can compute something
         # depend on the time
         self.contact_flag_released = True
         self.contact_flag = False
         self.tolerance = 1e-2  # reaching error threshold
         print("finish setup tiago reaching V1 task env.")
-
 
     def _step(self, action):
         """
@@ -107,12 +106,10 @@ class TiagoReachV1(TiagoEnv):
         except (rospy.ServiceException) as e:
             print("/gazebo/unpause_physics service call failed")
 
-
         if (action == act_clip).all():
             print("new action: {}".format(np.array(action)))
         else:
             print("new clip action: {}".format(act_clip))
-
 
         try:
 
@@ -148,7 +145,6 @@ class TiagoReachV1(TiagoEnv):
 
         done = self.is_task_done(self.state, joint_vel)
 
-
         distance = np.sqrt(np.sum(np.array(trans[:3])**2))
         reward = max(0.0, 2.0 - distance)
         print("=================episode: %d, step: %d, reward : %.3f, current dist: %.3f"
@@ -168,8 +164,9 @@ class TiagoReachV1(TiagoEnv):
         :return: clipped action value
         """
         # velocity clip
-        action = np.array(action) 
-        if  np.any(action >= self.action_upper) or np.any(action <= self.action_lower):
+        action = np.array(action)
+        act_clip = action
+        if np.any(action >= self.action_upper) or np.any(action <= self.action_lower):
             print("velocity bound clip")
             act_clip = np.clip(action, self.action_lower, self.action_upper)
 
@@ -273,13 +270,14 @@ class TiagoReachV1(TiagoEnv):
             end_pose_affine = np.dot(end_pose_affine, grasp_link_affine)
 
         ee_abs_pos = end_pose_affine[:3, 3].reshape(-1).tolist()
+        ee_quat = tf3d.quaternions.mat2quat(end_pose_affine[:3, :3]).tolist()
 
         # compute the relative pose to target pose (target frame relative the current frame)
-        target = self.ee_target_pose[:3, 3].reshape(-1)
-        distance = target - ee_abs_pos
+        target= self.ee_target_pose[:3, 3].reshape(-1)
+        distance= target - ee_abs_pos
 
         # form the end-effector twist list
-        ee_velocity = [ee_vel_msg.linear.x, ee_vel_msg.linear.y, ee_vel_msg.linear.z,
+        ee_velocity= [ee_vel_msg.linear.x, ee_vel_msg.linear.y, ee_vel_msg.linear.z,
                        ee_vel_msg.angular.x, ee_vel_msg.angular.y, ee_vel_msg.angular.z]
 
         return distance.tolist(), ee_abs_pos
@@ -294,7 +292,7 @@ class TiagoReachV1(TiagoEnv):
 
         # reset robot first stage
         self.reset_world()
-        self.ee_target_pose, self.goal = self.spawn_dynamic_reaching_goal('ball', random)
+        self.ee_target_pose, self.goal= self.spawn_dynamic_reaching_goal('ball', random)
         self._virtual_reset_arm_config()
 
         # self._reset_hand_pose() # no hand, so deprecated
@@ -306,9 +304,9 @@ class TiagoReachV1(TiagoEnv):
 
         # update `state`
         # state = self.discretize_observation(data, 5)
-        trans, abs_pos, joint_pos, joint_vel = self._get_obs()
-        self.state = trans + abs_pos
-        self.joint_pos = joint_pos
+        trans, abs_pos, joint_pos, joint_vel= self._get_obs()
+        self.state= trans + abs_pos
+        self.joint_pos= joint_pos
         self.current_epi += 1
         return np.array(self.state)
 
@@ -324,50 +322,50 @@ class TiagoReachV1(TiagoEnv):
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
-        x = 0.8
-        y = -0.1
-        z = 1
-        modelState = ModelState()
-        modelState.model_name = model_name
-        modelState.pose.orientation.x = 0
-        modelState.pose.orientation.y = 0
-        modelState.pose.orientation.z = 0
-        modelState.pose.orientation.w = 1
-        modelState.reference_frame = 'world'
+        x= 0.8
+        y= -0.1
+        z= 1
+        modelState= ModelState()
+        modelState.model_name= model_name
+        modelState.pose.orientation.x= 0
+        modelState.pose.orientation.y= 0
+        modelState.pose.orientation.z= 0
+        modelState.pose.orientation.w= 1
+        modelState.reference_frame= 'world'
         if random:
-            modelState.pose.position.x = x + np.random.sample() * 0.6 - 0.3
-            modelState.pose.position.y = y
-            modelState.pose.position.z = z + np.random.sample() * 0.6 - 0.3
+            modelState.pose.position.x= x + np.random.sample() * 0.6 - 0.3
+            modelState.pose.position.y= y
+            modelState.pose.position.z= z + np.random.sample() * 0.6 - 0.3
         else:
-            modelState.pose.position.x = x
-            modelState.pose.position.y = y
-            modelState.pose.position.z = z
+            modelState.pose.position.x= x
+            modelState.pose.position.y= y
+            modelState.pose.position.z= z
 
         self.set_model_state(modelState)
 
-        Rotation = tf3d.quaternions.quat2mat([modelState.pose.orientation.x, modelState.pose.orientation.y,
+        Rotation= tf3d.quaternions.quat2mat([modelState.pose.orientation.x, modelState.pose.orientation.y,
                                               modelState.pose.orientation.z, modelState.pose.orientation.w])
-        Translation = [modelState.pose.position.x, modelState.pose.position.y, modelState.pose.position.z]
-        target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
+        Translation= [modelState.pose.position.x, modelState.pose.position.y, modelState.pose.position.z]
+        target_pose= tf3d.affines.compose(Translation, Rotation, np.ones(3))
 
-        hand2ball_trans = [-0.35, 0.01, 0]
-        hand2ball_rot = tf3d.euler.euler2mat(0, 0, 0)
-        hand2ball_affine = tf3d.affines.compose(hand2ball_trans, hand2ball_rot, np.ones(3))
-        hand_pose_mat = np.dot(target_pose, np.linalg.inv(hand2ball_affine))
-        hand_translation = hand_pose_mat[:3, 3].reshape(-1)
-        hand_quat = tf3d.quaternions.mat2quat(hand_pose_mat[:3, :3]) # quaternion [w, x, y, z]
-        hand_pos = Pose()
-        hand_pos.position.x = hand_translation[0]
-        hand_pos.position.y = hand_translation[1]
-        hand_pos.position.z = hand_translation[2]
+        hand2ball_trans= [-0.35, 0.01, 0]
+        hand2ball_rot= tf3d.euler.euler2mat(0, 0, 0)
+        hand2ball_affine= tf3d.affines.compose(hand2ball_trans, hand2ball_rot, np.ones(3))
+        hand_pose_mat= np.dot(target_pose, np.linalg.inv(hand2ball_affine))
+        hand_translation= hand_pose_mat[:3, 3].reshape(-1)
+        hand_quat= tf3d.quaternions.mat2quat(hand_pose_mat[:3, :3]) # quaternion [w, x, y, z]
+        hand_pos= Pose()
+        hand_pos.position.x= hand_translation[0]
+        hand_pos.position.y= hand_translation[1]
+        hand_pos.position.z= hand_translation[2]
         # hand_pos.orientation.w = hand_quat[0]
         # hand_pos.orientation.x = hand_quat[1]
         # hand_pos.orientation.y = hand_quat[2]
         # hand_pos.orientation.z = hand_quat[3]
-        hand_pos.orientation.w = 1
-        hand_pos.orientation.x = 0
-        hand_pos.orientation.y = 0
-        hand_pos.orientation.z = 0
+        hand_pos.orientation.w= 1
+        hand_pos.orientation.x= 0
+        hand_pos.orientation.y= 0
+        hand_pos.orientation.z= 0
         # hand_pose = modelState.pose  # different from the target pose
         # hand_pose.position.x = x - 0.1
         return hand_pose_mat, hand_pos
@@ -375,7 +373,7 @@ class TiagoReachV1(TiagoEnv):
     def is_task_done(self, state, joint_vel):
 
         # extract end pose distance from state
-        end_pose_dist = state[:3]
+        end_pose_dist= state[:3]
 
         # TODO: add collision detection to cancel wrong/bad/negative trial!
         # TODO: add end-effector force sensor data to terminate the trial
@@ -385,7 +383,7 @@ class TiagoReachV1(TiagoEnv):
         #     return True
 
         # TODO: deprecated this task error. check task error
-        task_translation_error = norm(np.array(end_pose_dist))
+        task_translation_error= norm(np.array(end_pose_dist))
         if task_translation_error <= self.tolerance or task_translation_error >= 0.7:
             print("DONE, too far away from the target")
             return True
