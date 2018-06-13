@@ -85,14 +85,12 @@ class TiagoEnv(gazebo_env.GazeboEnv):
             self.ee_link = 'gripper_link'
             self.ee_frame = 'gripper_grasping_frame'
 
-
         self.robot = URDF.from_parameter_server()
         self.all_joint_names_order = [self.robot.joints[i].name for i in range(len(self.robot.joints))]
 
         ###############################################################################################################
         ########### set task specific env in child class, initialize action and observation space #####################
         ###############################################################################################################
-
 
         self.state = None  # observation space
         self.joint_pos = None  # current joint position
@@ -454,8 +452,6 @@ class TiagoEnv(gazebo_env.GazeboEnv):
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
 
-
-
         end_pose_msg = end_state.pose
         ee_vel_msg = end_state.twist
 
@@ -568,12 +564,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         except (rospy.ServiceException) as exc:
             print("/gazebo/pause_physics service call failed:" + str(exc))
 
-        # reset world firstly
-        # rospy.loginfo("reset world")
-        # self.__reset_world()
-
         joint_names = self.ctrl_joint_names
-        joint_positions = [0.21, -0.7, -1.8, 1.15, 0.0, 0.0, 0.0]
+        joint_positions = [0.21, -0.08, -1.24, 1.4, -1.8, 0.0, 0.0]
 
         time.sleep(1)
         return_status = self.set_model.call(model_name='tiago_' + self.robot_name,

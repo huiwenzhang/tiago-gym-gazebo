@@ -5,7 +5,7 @@ env = gym.make('TiagoReach-v1')
 # env = gym.make('TiagoPick-v0')
 env = env.unwrapped
 print(env.action_space)
-env.reset()
+env.reset(random=True)
 env.reach_to_point()
 # for i in range(1000):
 #     action = env.action_space.sample()

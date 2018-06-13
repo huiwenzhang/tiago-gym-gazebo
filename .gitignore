@@ -16,6 +16,7 @@
 *.sublime-workspace
 
 logs/
+models/
 
 .ipynb_checkpoints
 ghostdriver.log
