@@ -19,7 +19,7 @@ import gym_gazebo_ros
 
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--env', help='environment ID', type=str, default='Reacher-v2')
+    parser.add_argument('--env', help='environment ID', type=str, default='Reacher-v1')
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--num-timesteps', type=int, default=int(1e6))
     args = parser.parse_args()
@@ -49,7 +49,7 @@ def train(env_id, num_timesteps, seed):
 
     set_global_seeds(workerseed)
     env.seed(workerseed)
-    trpo_mpi.learn(env, policy_fn, timesteps_per_batch=300, max_kl=0.01, cg_iters=10, cg_damping=0.1,
+    trpo_mpi.learn(env, policy_fn, timesteps_per_batch=1024, max_kl=0.01, cg_iters=10, cg_damping=0.1,
         max_timesteps=num_timesteps, gamma=0.99, lam=0.98, vf_iters=5, vf_stepsize=1e-3)
     env.close()
 

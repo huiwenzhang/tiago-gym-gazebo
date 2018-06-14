@@ -100,8 +100,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         self.time_step_index = 0
         self.current_epi = 0
         self.lock = Lock()
-        self.tolerance = 1e-3  # reaching error threshold
-        self.control_period = 0.03
+        self.tolerance = 1e-2  # reaching error threshold
+        self.control_period = 0.025
         print("finish setup parent class tiago env.")
 
     def _wait_for_valid_time(self, timeout):

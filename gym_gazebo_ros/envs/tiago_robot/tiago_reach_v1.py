@@ -142,13 +142,15 @@ class TiagoReachV1(TiagoEnv):
         # TODO: add get the filtered force sensor data
         self.state = trans + abs_pos
         self.joint_pos = joint_pos
-
-        done = self.is_task_done(self.state, joint_vel)
-
-        distance = np.sqrt(np.sum(np.array(trans[:3])**2))
+        distance = np.sqrt(np.sum(np.array(trans[:3]) ** 2))
         reward = max(0.0, 2.0 - distance)
         print("=================episode: %d, step: %d, reward : %.3f, current dist: %.3f"
               % (self.current_epi, self.time_step_index, reward, distance))
+
+        done = self.is_task_done(self.state, joint_vel)
+
+
+
 
         # (needed by gym) we should return the state(or observation from state(function of state)), reward, and done status.
         # If the task completed, such as distance to target is d > = 0.001,
@@ -226,13 +228,13 @@ class TiagoReachV1(TiagoEnv):
         if self.robot_name == 'steel':
             # print('End effector is a gripper...')
             try:
-                end_state = self.get_link_pose_srv.call('tiago_steel::arm_7_link', "base_footprint").link_state
+                end_state = self.get_link_pose_srv.call('tiago_steel::arm_7_link', "world").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
         else:
             # print('End effector is a 5 finger hand....')
             try:
-                end_state = self.get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
+                end_state = self.get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "world").link_state
             except (rospy.ServiceException) as exc:
                 print("/gazebo/get_link_state service call failed:" + str(exc))
 
@@ -287,11 +289,11 @@ class TiagoReachV1(TiagoEnv):
         # using joint trajectory controller. Or the robot will back to its current position after unpause the simulation
 
         # reset arm position
-        print("=====================================================================================================\n")
+        print("\n=====================================================================================================")
         rospy.loginfo('reset environment...')
 
         # reset robot first stage
-        self.reset_world()
+        self.reset_world() # reset target pose and robot pose
         self.ee_target_pose, self.goal = self.spawn_dynamic_reaching_goal('ball', random)
         self._virtual_reset_arm_config()
 
@@ -300,10 +302,6 @@ class TiagoReachV1(TiagoEnv):
 
         print('===========================================reset done===============================================\n')
 
-        # read data to observation
-
-        # update `state`
-        # state = self.discretize_observation(data, 5)
         trans, abs_pos, joint_pos, joint_vel = self._get_obs()
         self.state = trans + abs_pos
         self.joint_pos = joint_pos
@@ -322,7 +320,7 @@ class TiagoReachV1(TiagoEnv):
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
-        x = 0.8
+        x = 0.6
         y = -0.1
         z = 1
         modelState = ModelState()
@@ -350,7 +348,7 @@ class TiagoReachV1(TiagoEnv):
         target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
 
         # the hand pose is relative to the target
-        hand2ball_trans = [-0.1, 0, 0]
+        hand2ball_trans = [-0.03, 0, 0]
         hand2ball_rot = tf3d.euler.euler2mat(0, 0, 0)
         hand2ball_affine = tf3d.affines.compose(hand2ball_trans, hand2ball_rot, np.ones(3))
         # T(hand2world) = T(ball2world) * T(hand2ball)
