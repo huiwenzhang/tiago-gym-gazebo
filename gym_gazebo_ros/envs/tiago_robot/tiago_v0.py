@@ -2,12 +2,9 @@
 import time
 import numpy as np
 from threading import Timer, Lock
-from gym import error, spaces, utils
 from gym.utils import seeding
 from . import ros_general_utils as ros_utils  # custom user defined ros utils
 from numpy.linalg import inv, norm
-import subprocess
-import os
 from gym_gazebo_ros.envs import gazebo_env
 
 # ros related data structure
@@ -16,8 +13,6 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint  # Used fo
 from control_msgs.msg import *  # control with action interface
 from sensor_msgs.msg import LaserScan, JointState
 from std_msgs.msg import Float64MultiArray, Header
-from std_srvs.srv import Empty
-import moveit_msgs.msg
 # custom defined service call for moveit plan
 from moveit_plan_service.srv import *
 
@@ -25,21 +20,20 @@ from moveit_plan_service.srv import *
 # ros related function packages
 import rospy
 import actionlib
-# import moveit_commander
 import transforms3d as tf3d
-from gazebo_msgs.srv import GetModelState, GetLinkState, SetModelConfiguration, DeleteModel, SpawnModel, SetModelState
 from gazebo_msgs.msg import ModelState, ContactState, ContactsState
 from controller_manager_msgs.srv import SwitchController, SwitchControllerRequest
 from urdf_parser_py.urdf import URDF
 from play_motion_msgs.msg import PlayMotionAction, PlayMotionGoal
 
+"""
+A base class, define shared variables and methods for specific task
+"""
+
 
 class TiagoEnv(gazebo_env.GazeboEnv):
 
     def __init__(self):
-        """
-        Initialized Tiago robot Env
-        """
         super(TiagoEnv, self).__init__()
 
         # Controllers
@@ -131,74 +125,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         Return:  state, reward, and done status in this function
         The action command comes from an agent, which is an algorithm used for making decision
         """
-
-        rospy.wait_for_service('/gazebo/unpause_physics')
-        try:
-            self.unpause_physics()
-        except (rospy.ServiceException) as e:
-            print("/gazebo/unpause_physics service call failed")
-
-        try:
-            # TODO: actually our action should consider the robot joint limit (including velocity limit)
-            # TODO: add action prediction and corresponding terminate condition prediction before take action
-            # TODO: limit action (position translocation), keep every step have a very small moving.
-            # we use joint position increment to send to robot
-            action = np.clip(action, self.action_lower, self.action_upper).tolist()
-            # positions_point = np.clip(action + np.array(joint_data.position),self.__joint_limits_lower, self.__joint_limits_upper)
-            print("new action is : {}".format(action))
-
-            # Control with action client
-            self.arm_pos_control_client.wait_for_server()
-            rospy.loginfo('connected to robot arm controller server')
-
-            g = FollowJointTrajectoryGoal()
-            g.trajectory = JointTrajectory()
-            g.trajectory.joint_names = self.ctrl_joint_names
-            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0] * len(action), time_from_start=rospy.Duration(self.control_period))]
-            self.arm_pos_control_client.send_goal(g)
-            rospy.loginfo('send position to robot arm')
-
-            # bug? wait for result blocking!
-            # self.arm_pos_control_client.wait_for_result()
-            time.sleep(self.control_period)
-            rospy.loginfo('Execute velocity control for one step')
-            result = self.arm_pos_control_client.get_state()
-            rospy.loginfo('task done with state: ' + self._get_states_string(result))
-
-        except KeyboardInterrupt:
-            self.arm_pos_control_client.cancel_goal()
-
-        # get joint data.
-        ee_rel_pose, force, abs_pos, joint_position, joint_vel = self._get_obs()
-        state = ee_rel_pose
-
-        # TODO: add get the filtered force sensor data
-        self.state = state
-        self.joint_pos = joint_position
-        # current_jacobian = self._get_jacobian(joint_position)
-
-        # (needed by gym )done is the terminate condition. We should
-        # return this value by considering the terminal condition.
-        # TODO:  timestep stop set in max_episode_steps when register this env.
-        # Another is using --nb-rollout-steps in running this env example?
-        done = self.is_task_done(state, joint_vel)
-
-        # TODO: add jacobian cost as part of reward, like GPS, which can avoid the robot explore the sigularity position.
-        #  Also can add joint torque as part of reward, like GPS.
-        # reward = max(0.0, 1.5 - 0.01*norm(np.array(end_pose_dist))**2)
-        end_pose_dist = state[:7]
-        distance = np.sqrt(np.sum(np.array(end_pose_dist[:3])**2) + ros_utils.distance_of_quaternion(end_pose_dist[3:7])**2)
-        # TODO: we should add safety bounds information to reward, not only terminate condition,like some paper!
-        reward = max(0.0, 4.0 - distance)
-
-        print("step: {}, reward : {}, current dist: {}".format(self.time_step_index, reward, distance))
-
-        # (needed by gym) we should return the state(or observation from state(function of state)), reward, and done status.
-        # If the task completed, such as distance to target is d > = 0.001,
-        # then return done= True, else return done = False. done depend on the terminal conditions partly.
-        # NOTE: `reward` always depend on done and action, or state, so it always calculated finally.
-        self.time_step_index += 1
-        return np.array(self.state), reward, done, {}
+        raise NotImplementedError
 
     def _valid_action_check(self, action):
         """
@@ -218,35 +145,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         pose, environment objects state, images state
         :return:
         """
-        joint_data = None
-        while joint_data is None:
-            rospy.loginfo('try to receive robot joint states...')
-            # joint state topic return sensor_msgs/joint_state msg with member pos, vec and effort
-            joint_data = rospy.wait_for_message('/joint_states', JointState, timeout=5)
-
-        # get joint position and velocity
-        idx = [i for i, x in enumerate(joint_data.name) if x in self.ctrl_joint_names]
-        joint_pos = [joint_data.position[i] for i in idx]
-        joint_vel = [joint_data.velocity[i] for i in idx]
-
-        # get end-effector position and distance to target and end-effector velocity
-        # end_pose_vel is end effector pose and velocity, ee_absolute_translation is absolute position
-        ee_relative_pose, ee_abs_pos = self.get_ee_state()
-
-        # get wrist force sensor data if titanium robot is used
-        if self.robot_name == 'titanium':
-            force_data_msg = None
-            while force_data_msg is None:
-                rospy.loginfo('try to receive force sensor data...')
-                force_data_msg = rospy.wait_for_message('/wrist_ft', WrenchStamped, timeout=5)
-
-            ee_force = [force_data_msg.wrench.force.x, force_data_msg.wrench.force.y, force_data_msg.wrench.force.z,
-                        force_data_msg.wrench.torque.x, force_data_msg.wrench.torque.y, force_data_msg.wrench.torque.z]
-            print('==================your force data is: {}'.format(force_data))
-        else:
-            ee_force = []
-
-        return ee_relative_pose, ee_force, ee_abs_pos, joint_pos, joint_vel
+        raise NotImplementedError
 
     def _reset(self, random=False):
         # we should stop our controllers firstly or send the initial joint angles to robot
@@ -266,29 +165,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         # TODO: reset env is needed
         # self.ee_target_pose, self.goal =  self.spawn_dynamic_reaching_goal('ball', random)
         self._virtual_reset_arm_config()
-        # self._reset_hand_pose()
-
-        # self._reset_hand_pose() # no hand, so deprecated
-
-        # reset the manipulation objects and robot arm
-        # self._reset_target_pose(self.__current_object)
 
         time.sleep(0.2)
-
-        # we should reset again (second stage)
-        # reset world second time
-        # self._reset_world_scene()   # commented for test
-        # reset robot
-        # self._reset_robot_arm_pose() # commented for test
-        # self._reset_hand_pose()
-
-        # reset the manipulation objects and robot arm
-        # self._reset_target_pose(self.__current_object)
-
-        # # switch controller
-        # self._switch_ctrl.call(stop_controllers=["arm_gazebo_controller"],
-        #                 start_controllers=["joint_group_velocity_controller"],
-        #                     strictness=SwitchControllerRequest.BEST_EFFORT)
 
         print('===========================================reset done===============================================\n')
 
@@ -437,91 +315,10 @@ class TiagoEnv(gazebo_env.GazeboEnv):
 
         Return target pose relative to the target.
         """
-        rospy.wait_for_service('/gazebo/get_link_state')
-
-        if self.robot_name == 'steel':
-            # print('End effector is a gripper...')
-            try:
-                end_state = self.get_link_pose_srv.call('tiago_steel::arm_7_link', "base_footprint").link_state
-            except (rospy.ServiceException) as exc:
-                print("/gazebo/get_link_state service call failed:" + str(exc))
-        else:
-            # print('End effector is a 5 finger hand....')
-            try:
-                end_state = self.get_link_pose_srv.call('tiago_titanium::hand_mrl_link', "base_footprint").link_state
-            except (rospy.ServiceException) as exc:
-                print("/gazebo/get_link_state service call failed:" + str(exc))
-
-        end_pose_msg = end_state.pose
-        ee_vel_msg = end_state.twist
-
-        ###### start to extract the msg to data ######
-
-        # translate the pose msg type to numpy.ndarray
-        q = [end_pose_msg.orientation.w, end_pose_msg.orientation.x, end_pose_msg.orientation.y, end_pose_msg.orientation.z]
-        Rotation = tf3d.quaternions.quat2mat(q)
-        Translation = [end_pose_msg.position.x, end_pose_msg.position.y, end_pose_msg.position.z]
-        end_pose_affine = tf3d.affines.compose(Translation, Rotation, np.ones(3))
-
-        # transform form tool frame to grasp frame
-        if self.robot_name == 'steel':
-            r1 = tf3d.quaternions.quat2mat([-0.5, 0.5, 0.5, 0.5])
-            trans1 = [0, 0, 0.046]
-            arm_tool_affine = tf3d.affines.compose(trans1, r1, np.ones(3))
-            arm_tool_pose = np.dot(end_pose_affine, arm_tool_affine)
-
-            r2 = tf3d.quaternions.quat2mat([0, 0.707, 0, -0.707])
-            trans2 = [0.01, 0, 0]
-            gripper_link_affine = tf3d.affines.compose(trans2, r2, np.ones(3))
-            gripper_pose = np.dot(arm_tool_pose, gripper_link_affine)
-
-            r3 = tf3d.quaternions.quat2mat([0.5, -0.5, 0.5, 0.5])
-            trans3 = [0, 0, -0.12]
-            grasp_link_affine = tf3d.affines.compose(trans3, r3, np.ones(3))
-            end_pose_affine = np.dot(gripper_pose, grasp_link_affine)
-        else:
-            r = tf3d.quaternions.quat2mat([1, 0, 0, 0])
-            trans = [0.13, 0.02, 0]
-            grasp_link_affine = tf3d.affines.compose(trans, r, np.ones(3))
-            end_pose_affine = np.dot(end_pose_affine, grasp_link_affine)
-
-        ee_abs_pos = end_pose_affine[:3, 3].reshape(-1).tolist()
-
-        # compute the relative pose to target pose (target frame relative the current frame)
-        ee_pose_dist_affine = np.dot(inv(end_pose_affine), self.ee_target_pose)
-
-        # translate the relative pose affine matrix to list (position, quaternion)
-        ee_translation = ee_pose_dist_affine[:3, 3].reshape(-1).tolist()
-        ee_quat = tf3d.quaternions.mat2quat(ee_pose_dist_affine[:3, :3]).tolist()
-        ee_relative_pose = ee_translation + ee_quat
-
-        # form the end-effector twist list
-        ee_velocity = [ee_vel_msg.linear.x, ee_vel_msg.linear.y, ee_vel_msg.linear.z,
-                       ee_vel_msg.angular.x, ee_vel_msg.angular.y, ee_vel_msg.angular.z]
-
-        return ee_relative_pose, ee_abs_pos
+        raise NotImplementedError
 
     def is_task_done(self, state, joint_vel):
-
-        # extract end pose distance from state
-        end_pose_dist = state[:7]
-
-        # TODO: add collision detection to cancel wrong/bad/negative trial!
-        # TODO: add end-effector force sensor data to terminate the trial
-
-        if np.any(np.greater(np.fabs(joint_vel), self.__joint_vel_limits_upper)):
-            print('ERROR: velocity beyond system limitation, task is over')
-            return True
-
-        # TODO: deprecated this task error. check task error
-        task_translation_error = norm(np.array(end_pose_dist[:3]))
-        task_rotation_error = ros_utils.distance_of_quaternion(end_pose_dist[3:7])
-        epsilon = self.tolerance
-
-        if task_translation_error <= epsilon and task_rotation_error <= 200 * epsilon:
-            return True
-        else:
-            return False
+        raise NotImplementedError
 
     def _get_jacobian(self, joint_state):
         dim_pose = 6
