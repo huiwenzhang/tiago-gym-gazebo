@@ -56,7 +56,7 @@ class TiagoReachV1(TiagoEnv):
                 self.__joint_vel_upper.append(joint.limit.velocity)
                 self.__joint_force_limits.append(joint.limit.effort)
 
-        print("joints controlled in this demo: {}".format(self.ctrl_joint_names))
+        print("joints controlled in this task: {}".format(self.ctrl_joint_names))
 
         # TODO: change the corresponding items according to your task
         # position, action is incremental postion command
@@ -85,8 +85,7 @@ class TiagoReachV1(TiagoEnv):
 
         # define the number of time step for every step know the time, then it can compute something
         # depend on the time
-        self.contact_flag_released = True
-        self.contact_flag = False
+
         self.tolerance = 1e-2  # reaching error threshold
         print("finish setup tiago reaching V1 task env.")
 
@@ -110,6 +109,7 @@ class TiagoReachV1(TiagoEnv):
             print("new action: {}".format(np.array(action)))
         else:
             print("new clip action: {}".format(act_clip))
+        print("desired joint config.: {}".format(np.array(curr_goal)))
 
         try:
 
@@ -148,9 +148,6 @@ class TiagoReachV1(TiagoEnv):
               % (self.current_epi, self.time_step_index, reward, distance))
 
         done = self.is_task_done(self.state, joint_vel)
-
-
-
 
         # (needed by gym) we should return the state(or observation from state(function of state)), reward, and done status.
         # If the task completed, such as distance to target is d > = 0.001,
@@ -197,7 +194,8 @@ class TiagoReachV1(TiagoEnv):
         # get joint position and velocity
         idx = [i for i, x in enumerate(joint_data.name) if x in self.ctrl_joint_names]
         joint_pos = [joint_data.position[i] for i in idx]
-        joint_vel = [joint_data.velocity[i] for i in idx]
+        # joint_vel = [joint_data.velocity[i] for i in idx]
+        joint_vel = None
 
         # get end-effector position and distance to target and end-effector velocity
         # end_pose_vel is end effector pose and velocity, ee_absolute_translation is absolute position
@@ -293,7 +291,7 @@ class TiagoReachV1(TiagoEnv):
         rospy.loginfo('reset environment...')
 
         # reset robot first stage
-        self.reset_world() # reset target pose and robot pose
+        self.reset_world()  # reset target pose and robot pose
         self.ee_target_pose, self.goal = self.spawn_dynamic_reaching_goal('ball', random)
         self._virtual_reset_arm_config()
 
@@ -356,7 +354,6 @@ class TiagoReachV1(TiagoEnv):
         hand_translation = hand_pose_mat[:3, 3].reshape(-1)
         hand_quat = tf3d.quaternions.mat2quat(hand_pose_mat[:3, :3])  # quaternion [w, x, y, z]
 
-
         hand_pos = Pose()
         hand_pos.position.x = hand_translation[0]
         hand_pos.position.y = hand_translation[1]
@@ -372,7 +369,7 @@ class TiagoReachV1(TiagoEnv):
 
     def is_task_done(self, state, joint_vel):
 
-        # extract end pose distance from state
+        # extract end position distance from state
         end_pose_dist = state[:3]
 
         # TODO: add collision detection to cancel wrong/bad/negative trial!
@@ -384,8 +381,14 @@ class TiagoReachV1(TiagoEnv):
 
         # TODO: deprecated this task error. check task error
         task_translation_error = norm(np.array(end_pose_dist))
-        if task_translation_error <= self.tolerance or task_translation_error >= 0.7:
+        if task_translation_error >= 0.7:
             print("DONE, too far away from the target")
+            return True
+        elif self.contact_flag:
+            print("DONE, collision with objects")
+            return True
+        elif task_translation_error <= self.tolerance:
+            print("DONE, task succeed")
             return True
         else:
             return False

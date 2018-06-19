@@ -79,8 +79,15 @@ class TiagoEnv(gazebo_env.GazeboEnv):
             self.ee_link = 'gripper_link'
             self.ee_frame = 'gripper_grasping_frame'
 
+        # contact information
+        rospy.Subscriber("/gripper_left_finger_contact_state", ContactsState, self._contact_cb)
+
         self.robot = URDF.from_parameter_server()
-        self.all_joint_names_order = [self.robot.joints[i].name for i in range(len(self.robot.joints))]
+        self.all_joints = [self.robot.joints[i].name for i in range(len(self.robot.joints))]
+        self.all_movable_joints = []
+        for i, joint in enumerate(self.robot.joints):
+            if joint.joint_type != 'fixed':
+                self.all_movable_joints.append(joint.name)
 
         ###############################################################################################################
         ########### set task specific env in child class, initialize action and observation space #####################
@@ -96,7 +103,20 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         self.lock = Lock()
         self.tolerance = 1e-2  # reaching error threshold
         self.control_period = 0.025
+        self.contact_flag_released = True
+        self.contact_flag = False
+
         print("finish setup parent class tiago env.")
+
+    def _contact_cb(self, bumperstate):
+        # multiple contacts
+        self.lock.acquire()
+        if len(bumperstate.states) >= 1:
+            self.contact_flag = True
+            self.contact_flag_released = False
+            for i in range(len(bumperstate.states)):
+                print(bumperstate.states[i].collision1_name + " collide with " + bumperstate.states[i].collision2_name)
+        self.lock.release()
 
     def _wait_for_valid_time(self, timeout):
         """
