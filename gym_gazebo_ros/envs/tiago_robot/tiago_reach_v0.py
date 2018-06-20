@@ -38,10 +38,10 @@ class TiagoReachV0(TiagoEnv):
         # resolve for action space and observation space
         self.hand_joint_names = ['hand_thumb_joint', 'hand_index_joint', 'hand_mrl_joint']
         self.ctrl_joint_names = []
-        self.__joint_limits_lower = []
-        self.__joint_limits_upper = []
-        self.__joint_vel_limits_upper = []
-        self.__joint_vel_limits_lower = []
+        self.__joint_pos_lower = []
+        self.__joint_pos_upper = []
+        self.__joint_vel_upper = []
+        self.__joint_vel_lower = []
         self.__joint_force_limits = []
 
         for i, joint in enumerate(self.robot.joints):
@@ -49,20 +49,20 @@ class TiagoReachV0(TiagoEnv):
             # TODO: control more groups in future work. this demo just consider arm group
             if joint.joint_type != 'fixed' and (joint.name.startswith('arm') is True):  # skip hand related joints
                 self.ctrl_joint_names.append(joint.name)
-                self.__joint_limits_lower.append(
-                    joint.limit.lower) if joint.limit.lower is not None else self.__joint_limits_lower.append(-np.inf)
-                self.__joint_limits_upper.append(
-                    joint.limit.upper) if joint.limit.upper is not None else self.__joint_limits_upper.append(np.inf)
-                self.__joint_vel_limits_lower.append(-joint.limit.velocity)
-                self.__joint_vel_limits_upper.append(joint.limit.velocity)
+                self.__joint_pos_lower.append(
+                    joint.limit.lower) if joint.limit.lower is not None else self.__joint_pos_lower.append(-np.inf)
+                self.__joint_pos_upper.append(
+                    joint.limit.upper) if joint.limit.upper is not None else self.__joint_pos_upper.append(np.inf)
+                self.__joint_vel_lower.append(-joint.limit.velocity)
+                self.__joint_vel_upper.append(joint.limit.velocity)
                 self.__joint_force_limits.append(joint.limit.effort)
 
-        print("joints controlled in this demo: {}".format(self.ctrl_joint_names))
+        print("joints controlled in this task: {}".format(self.ctrl_joint_names))
 
         # TODO: change the corresponding items according to your task
-        # position, action is postion command
-        self.action_lower = np.array(self.__joint_limits_lower)
-        self.action_upper = np.array(self.__joint_limits_upper)
+        # position, action is incremental postion command
+        self.action_lower = np.array(self.__joint_vel_lower) * self.control_period * .5
+        self.action_upper = np.array(self.__joint_vel_upper) * self.control_period * .5
         self.action_space = spaces.Box(self.action_lower, self.action_upper)
 
         # (state)observation space: task oriented configuration
@@ -182,14 +182,22 @@ class TiagoReachV0(TiagoEnv):
         :param action: original action value
         :return: clipped action value
         """
+        # velocity clip
         action = np.array(action)
-        safe_coef = 0.4
-        pos_upper = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_upper) * self.control_period * safe_coef
-        pos_lower = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_lower) * self.control_period * safe_coef
-        if not (np.all(action <= pos_upper) and np.all(action >= pos_lower)):
-            print("Invalid value, return clipped value")
-            action = np.clip(action, pos_lower, pos_upper)
-        return action
+        act_clip = action
+        if np.any(action >= self.action_upper) or np.any(action <= self.action_lower):
+            print("velocity bound clip")
+            act_clip = np.clip(action, self.action_lower, self.action_upper)
+
+        # position clip
+        curr_joint_pos = np.array(self.joint_pos)
+        curr_goal = act_clip + curr_joint_pos
+        if np.any(curr_goal >= self.__joint_pos_upper) or np.any(curr_goal <= self.__joint_pos_lower):
+            print("joint bound clip")
+            curr_goal = np.clip(curr_goal, self.__joint_pos_lower, self.__joint_pos_upper).tolist()
+            # actually used clipped action, we should use this info. to update our policy
+            act_clip = curr_goal - curr_joint_pos
+        return act_clip, curr_goal
 
     def _get_obs(self):
         """
@@ -322,9 +330,7 @@ class TiagoReachV0(TiagoEnv):
         ee_pose, ee_rel_pose, joint_pos, joint_vel = self._get_obs()
         self.joint_pos = joint_pos
         state = ee_pose + ee_rel_pose
-        # self.time_step_index = 0
-
-        # (needed by gym) return the initial observation or state
+        self.current_epi += 1
         return np.array(state)
 
     def spawn_dynamic_reaching_goal(self, model_name, random=False):
@@ -339,7 +345,7 @@ class TiagoReachV0(TiagoEnv):
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
-        x = 0.5
+        x = 0.6
         y = -0.1
         z = 1
         modelState = ModelState()
@@ -349,10 +355,11 @@ class TiagoReachV0(TiagoEnv):
         modelState.pose.orientation.z = 0
         modelState.pose.orientation.w = 1
         modelState.reference_frame = 'world'
+
         if random:
-            modelState.pose.position.x = x + np.random.sample() * 0.6 - 0.3
+            modelState.pose.position.x = x + np.random.sample() * 0.4 - 0.2
             modelState.pose.position.y = y
-            modelState.pose.position.z = z + np.random.sample() * 0.6 - 0.3
+            modelState.pose.position.z = z + np.random.sample() * 0.4 - 0.2
         else:
             modelState.pose.position.x = x
             modelState.pose.position.y = y
@@ -360,14 +367,32 @@ class TiagoReachV0(TiagoEnv):
 
         self.set_model_state(modelState)
 
-        Rotation = tf3d.quaternions.quat2mat([modelState.pose.orientation.x, modelState.pose.orientation.y,
-                                              modelState.pose.orientation.z, modelState.pose.orientation.w])
+        Rotation = tf3d.quaternions.quat2mat([modelState.pose.orientation.w, modelState.pose.orientation.x,
+                                              modelState.pose.orientation.y, modelState.pose.orientation.z])
         Translation = [modelState.pose.position.x, modelState.pose.position.y, modelState.pose.position.z]
         target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
 
-        hand_pose = modelState.pose  # different from the target pose
-        hand_pose.position.x = x - 0.1
-        return target_pose, hand_pose
+        # the hand pose is relative to the target
+        hand2ball_trans = [-0.04, 0, 0]
+        hand2ball_rot = tf3d.euler.euler2mat(0, 0, 0)
+        hand2ball_affine = tf3d.affines.compose(hand2ball_trans, hand2ball_rot, np.ones(3))
+        # T(hand2world) = T(ball2world) * T(hand2ball)
+        hand_pose_mat = np.dot(target_pose, hand2ball_affine)
+        hand_translation = hand_pose_mat[:3, 3].reshape(-1)
+        hand_quat = tf3d.quaternions.mat2quat(hand_pose_mat[:3, :3])  # quaternion [w, x, y, z]
+
+        hand_pos = Pose()
+        hand_pos.position.x = hand_translation[0]
+        hand_pos.position.y = hand_translation[1]
+        hand_pos.position.z = hand_translation[2]
+        hand_pos.orientation.w = hand_quat[0]
+        hand_pos.orientation.x = hand_quat[1]
+        hand_pos.orientation.y = hand_quat[2]
+        hand_pos.orientation.z = hand_quat[3]
+
+        # hand_pose = modelState.pose  # different from the target pose
+        # hand_pose.position.x = x - 0.1
+        return hand_pose_mat, hand_pos
 
     def is_task_done(self, state, joint_vel):
 
