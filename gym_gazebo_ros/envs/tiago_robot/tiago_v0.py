@@ -81,6 +81,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
 
         # contact information
         rospy.Subscriber("/gripper_left_finger_contact_state", ContactsState, self._contact_cb)
+        rospy.Subscriber("/gripper_right_finger_contact_state", ContactsState, self._contact_cb)
 
         self.robot = URDF.from_parameter_server()
         self.all_joints = [self.robot.joints[i].name for i in range(len(self.robot.joints))]

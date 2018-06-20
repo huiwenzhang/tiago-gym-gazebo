@@ -26,7 +26,7 @@ np.set_printoptions(precision=3, suppress=True)
 """
 Reach task version 1:
 Different from v0 version, reaching the ball without orientation constraits and
-observation space inlucde ee positon and distance
+observation space: distance, hand position
 """
 
 
@@ -97,7 +97,14 @@ class TiagoReachV1(TiagoEnv):
         The action command comes from an agent, which is an algorithm used for making decision
         """
         # Clip by veloctiy
+
+        print("raw action: {}".format(action))
         act_clip, curr_goal = self._action_clip(action)  # should we used incremental command for a?
+
+        if (action != act_clip).any():
+            print("cliped action: {}".format(act_clip))
+        print("current joint config.: {}".format(np.array(self.joint_pos)))
+        print("desired joint config.: {}".format(np.array(curr_goal)))
 
         rospy.wait_for_service('/gazebo/unpause_physics')
         try:
@@ -105,17 +112,11 @@ class TiagoReachV1(TiagoEnv):
         except (rospy.ServiceException) as e:
             print("/gazebo/unpause_physics service call failed")
 
-        if (action == act_clip).all():
-            print("new action: {}".format(np.array(action)))
-        else:
-            print("new clip action: {}".format(act_clip))
-        print("desired joint config.: {}".format(np.array(curr_goal)))
-
         try:
 
             # Control with action client
             self.arm_pos_control_client.wait_for_server()
-            rospy.loginfo('connected to robot arm controller server')
+            # rospy.loginfo('connected to robot arm controller server')
 
             g = FollowJointTrajectoryGoal()
             g.trajectory = JointTrajectory()
@@ -123,14 +124,14 @@ class TiagoReachV1(TiagoEnv):
             g.trajectory.points = [JointTrajectoryPoint(positions=curr_goal, velocities=[0] * len(action),
                                                         time_from_start=rospy.Duration(self.control_period))]
             self.arm_pos_control_client.send_goal(g)
-            rospy.loginfo('send position to robot arm')
+            # rospy.loginfo('send position to robot arm')
 
             # bug? wait for result blocking!
             # self.arm_pos_control_client.wait_for_result()
             time.sleep(self.control_period)
             # pause physics for data processing
             # self.pause_physics.call()
-            rospy.loginfo('Execute velocity control for one step')
+            # rospy.loginfo('Execute velocity control for one step')
             result = self.arm_pos_control_client.get_state()
             rospy.loginfo('task done with state: ' + self._get_states_string(result))
         except KeyboardInterrupt:
@@ -138,23 +139,28 @@ class TiagoReachV1(TiagoEnv):
 
         # get joint data.
         trans, abs_pos, joint_pos, joint_vel = self._get_obs()
-
-        # TODO: add get the filtered force sensor data
-        self.state = trans + abs_pos
-        self.joint_pos = joint_pos
-        distance = np.sqrt(np.sum(np.array(trans[:3]) ** 2))
-        reward = max(0.0, 2.0 - distance)
-        print("=================episode: %d, step: %d, reward : %.3f, current dist: %.3f"
-              % (self.current_epi, self.time_step_index, reward, distance))
-
-        done = self.is_task_done(self.state, joint_vel)
+        obs_ = trans + abs_pos  # next state
+        done = self.is_task_done(obs_, joint_vel)   # done flag
+        reward = self.get_reward(obs_)  # reward
+        print("=================episode: %d, step: %d, reward : %.3f"
+              % (self.current_epi, self.time_step_index, reward))
 
         # (needed by gym) we should return the state(or observation from state(function of state)), reward, and done status.
         # If the task completed, such as distance to target is d > = 0.001,
         # then return done= True, else return done = False. done depend on the terminal conditions partly.
         # NOTE: `reward` always depend on done and action, or state, so it always calculated finally.
+        self.joint_pos = joint_pos  # update joint state
         self.time_step_index += 1
-        return np.array(self.state), reward, done, {}
+        return np.array(obs_), reward, done, {}
+
+    def get_reward(self, obs):
+        """
+        retrieve reward
+        :param obs: current state, include the distance to target and the end effector postion
+        :return:
+        """
+        dist = np.sqrt(np.sum(np.array(obs[:3]) ** 2))
+        return max(0.0, 2.0 - dist)
 
     def _action_clip(self, action):
         """
@@ -187,15 +193,15 @@ class TiagoReachV1(TiagoEnv):
         """
         joint_data = None
         while joint_data is None:
-            rospy.loginfo('try to receive robot joint states...')
+            # rospy.loginfo('try to receive robot joint states...')
             # joint state topic return sensor_msgs/joint_state msg with member pos, vec and effort
             joint_data = rospy.wait_for_message('/joint_states', JointState, timeout=5)
 
         # get joint position and velocity
         idx = [i for i, x in enumerate(joint_data.name) if x in self.ctrl_joint_names]
         joint_pos = [joint_data.position[i] for i in idx]
-        # joint_vel = [joint_data.velocity[i] for i in idx]
-        joint_vel = None
+        joint_vel = [joint_data.velocity[i] for i in idx]
+        # joint_vel = None
 
         # get end-effector position and distance to target and end-effector velocity
         # end_pose_vel is end effector pose and velocity, ee_absolute_translation is absolute position
@@ -287,7 +293,7 @@ class TiagoReachV1(TiagoEnv):
         # using joint trajectory controller. Or the robot will back to its current position after unpause the simulation
 
         # reset arm position
-        print("\n=====================================================================================================")
+        print("\n=======================================================================================")
         rospy.loginfo('reset environment...')
 
         # reset robot first stage
@@ -298,7 +304,7 @@ class TiagoReachV1(TiagoEnv):
         # self._reset_hand_pose() # no hand, so deprecated
         time.sleep(0.2)
 
-        print('===========================================reset done===============================================\n')
+        print('===========================================reset done=====================================\n')
 
         trans, abs_pos, joint_pos, joint_vel = self._get_obs()
         self.state = trans + abs_pos
@@ -346,7 +352,7 @@ class TiagoReachV1(TiagoEnv):
         target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
 
         # the hand pose is relative to the target
-        hand2ball_trans = [-0.03, 0, 0]
+        hand2ball_trans = [-0.04, 0, 0]
         hand2ball_rot = tf3d.euler.euler2mat(0, 0, 0)
         hand2ball_affine = tf3d.affines.compose(hand2ball_trans, hand2ball_rot, np.ones(3))
         # T(hand2world) = T(ball2world) * T(hand2ball)
@@ -368,9 +374,12 @@ class TiagoReachV1(TiagoEnv):
         return hand_pose_mat, hand_pos
 
     def is_task_done(self, state, joint_vel):
+        self.lock.acquire()
+        contact_flag = self.contact_flag
+        self.lock.release()
 
         # extract end position distance from state
-        end_pose_dist = state[:3]
+        dist = norm(np.array(state[:3]))
 
         # TODO: add collision detection to cancel wrong/bad/negative trial!
         # TODO: add end-effector force sensor data to terminate the trial
@@ -379,15 +388,14 @@ class TiagoReachV1(TiagoEnv):
         #     print('DONE, robot joint velocity exceed the joint velocity limit')
         #     return True
 
-        # TODO: deprecated this task error. check task error
-        task_translation_error = norm(np.array(end_pose_dist))
-        if task_translation_error >= 0.7:
+        if dist >= 0.7:
             print("DONE, too far away from the target")
             return True
-        elif self.contact_flag:
+        elif contact_flag:
             print("DONE, collision with objects")
+            self.contact_flag = False
             return True
-        elif task_translation_error <= self.tolerance:
+        elif dist <= self.tolerance:
             print("DONE, task succeed")
             return True
         else:
