@@ -97,6 +97,7 @@ class TiagoReachV0(TiagoEnv):
         self.contact_flag_released = True
         self.contact_flag = False
         self.tolerance = 1e-2  # reaching error threshold
+        self.control_period = 0.01
         print("finish setup tiago reaching V0 task env.")
 
     def _step(self, action):
@@ -134,7 +135,7 @@ class TiagoReachV0(TiagoEnv):
             g = FollowJointTrajectoryGoal()
             g.trajectory = JointTrajectory()
             g.trajectory.joint_names = self.ctrl_joint_names
-            g.trajectory.points = [JointTrajectoryPoint(positions=action, velocities=[0] * len(action), time_from_start=rospy.Duration(self.control_period))]
+            g.trajectory.points = [JointTrajectoryPoint(positions=curr_goal, velocities=[0] * len(action), time_from_start=rospy.Duration(self.control_period))]
             self.arm_pos_control_client.send_goal(g)
             rospy.loginfo('send position to robot arm')
 
@@ -215,7 +216,11 @@ class TiagoReachV0(TiagoEnv):
         idx = [i for i, x in enumerate(joint_data.name) if x in self.ctrl_joint_names]
         joint_pos = [joint_data.position[i] for i in idx]
         joint_vel = [joint_data.velocity[i] for i in idx]
+        print("current joint config.: {}".format(np.array(joint_pos)))
 
+
+        assert ((np.array(joint_pos) <= np.array(self.__joint_pos_upper) + 0.009).all() and
+                (np.array(joint_pos) >= np.array(self.__joint_pos_lower) - 0.009).all()), 'Illeagal joint state value'
         # get end-effector position and distance to target and end-effector velocity
         # end_pose_vel is end effector pose and velocity, ee_absolute_translation is absolute position
         ee_pose, ee_rel_pose = self.get_ee_state()
@@ -310,7 +315,7 @@ class TiagoReachV0(TiagoEnv):
         # using joint trajectory controller. Or the robot will back to its current position after unpause the simulation
 
         # reset arm position
-        print("=====================================================================================================\n")
+        print("\n=====================================================================================================")
         rospy.loginfo('reset environment...')
 
         # reset robot first stage
@@ -345,7 +350,7 @@ class TiagoReachV0(TiagoEnv):
         except (rospy.ServiceException) as exc:
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
-        x = 0.6
+        x = 0.7
         y = -0.1
         z = 1
         modelState = ModelState()
@@ -403,7 +408,7 @@ class TiagoReachV0(TiagoEnv):
         # extract end position distance from state
         obs = state[7:]
         dist = norm(np.array(obs[:3]))
-        dist_ori = ros_utils.distance_of_quaternion(obs[3:])
+        dist_ori = ros_utils.distance_of_quaternion(obs[3:])   # [0, 3.14]
 
         # TODO: add collision detection to cancel wrong/bad/negative trial!
         # TODO: add end-effector force sensor data to terminate the trial
@@ -415,8 +420,9 @@ class TiagoReachV0(TiagoEnv):
         if dist >= 0.7:
             print("DONE, too far away from the target")
             return True
-        elif dist_ori >= 0.3:
+        elif dist_ori >= 1.57:
             print("DONE, wrong direction")
+            return True
         elif contact_flag:
             print("DONE, collision with objects")
             self.contact_flag = False

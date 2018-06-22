@@ -80,6 +80,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
             self.ee_frame = 'gripper_grasping_frame'
 
         # contact information
+        self.lock = Lock()
         rospy.Subscriber("/gripper_left_finger_contact_state", ContactsState, self._contact_cb)
         rospy.Subscriber("/gripper_right_finger_contact_state", ContactsState, self._contact_cb)
 
@@ -101,7 +102,6 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         # depend on the time
         self.time_step_index = 0
         self.current_epi = 0
-        self.lock = Lock()
         self.tolerance = 1e-2  # reaching error threshold
         self.control_period = 0.025
         self.contact_flag_released = True

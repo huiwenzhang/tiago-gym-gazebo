@@ -202,6 +202,8 @@ class TiagoReachV1(TiagoEnv):
         joint_pos = [joint_data.position[i] for i in idx]
         joint_vel = [joint_data.velocity[i] for i in idx]
         # joint_vel = None
+        assert ((np.array(joint_pos) <= np.array(self.__joint_pos_upper)).all() and
+            (np.array(joint_pos) >= np.array(self.__joint_pos_lower)).all()), 'Illeagal joint state value'
 
         # get end-effector position and distance to target and end-effector velocity
         # end_pose_vel is end effector pose and velocity, ee_absolute_translation is absolute position
