@@ -29,3 +29,8 @@ ghostdriver.log
 # PyCharm project files
 .idea
 vizdoom.ini
+
+
+# Assembler task realted files
+examples/assem*
+tiago_gym_gazebo/envs/assembler_task/
