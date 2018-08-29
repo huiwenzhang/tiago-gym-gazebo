@@ -31,6 +31,6 @@ ghostdriver.log
 vizdoom.ini
 
 
-# Assembler task realted files
+# Assembler task related files
 examples/assem*
 tiago_gym_gazebo/envs/assembler_task/

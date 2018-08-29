@@ -9,7 +9,8 @@ from gym_gazebo_ros.envs import gazebo_env
 
 # ros related data structure
 from geometry_msgs.msg import Twist, WrenchStamped, Pose, PoseStamped
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint  # Used for publishing UR joint angles.
+# Used for publishing UR joint angles.
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from control_msgs.msg import *  # control with action interface
 from sensor_msgs.msg import LaserScan, JointState
 from std_msgs.msg import Float64MultiArray, Header
@@ -38,62 +39,79 @@ class TiagoEnv(gazebo_env.GazeboEnv):
 
         # Controllers
         rospy.wait_for_service("/controller_manager/switch_controller")
-        self.switch_ctrl = rospy.ServiceProxy("/controller_manager/switch_controller", SwitchController)
+        self.switch_ctrl = rospy.ServiceProxy(
+            "/controller_manager/switch_controller", SwitchController)
 
-        # param_names = rospy.get_param_names() # return a list include all the names in parameter serve
+        # param_names = rospy.get_param_names() # return a list include all the
+        # names in parameter serve
         arm_joint_names = rospy.get_param("/arm_controller/joints")
         print('Getting parameters from parameter server done...')
 
         # Tiago  controllers, actually here we use position controller
-        self.arm_vel_publisher = rospy.Publisher("arm_controller/command", JointTrajectory, queue_size=1)
-        self.torso_vel_publisher = rospy.Publisher("torso_controller/command", JointTrajectory, queue_size=1)
-        self.head_vel_publisher = rospy.Publisher("head_controller/command", JointTrajectory, queue_size=1)
-        self.base_vel_publisher = rospy.Publisher("mobile_base_controller/cmd_vel", Twist, queue_size=1)
+        self.arm_vel_publisher = rospy.Publisher(
+            "arm_controller/command", JointTrajectory, queue_size=1)
+        self.torso_vel_publisher = rospy.Publisher(
+            "torso_controller/command", JointTrajectory, queue_size=1)
+        self.head_vel_publisher = rospy.Publisher(
+            "head_controller/command", JointTrajectory, queue_size=1)
+        self.base_vel_publisher = rospy.Publisher(
+            "mobile_base_controller/cmd_vel", Twist, queue_size=1)
 
         if self.robot_name == 'titanium':
-            self.hand_vel_publisher = rospy.Publisher("hand_controller/command", JointTrajectory, queue_size=1)
+            self.hand_vel_publisher = rospy.Publisher(
+                "hand_controller/command", JointTrajectory, queue_size=1)
         else:
-            self.hand_vel_publisher = rospy.Publisher("gripper_controller/command", JointTrajectory, queue_size=1)
+            self.hand_vel_publisher = rospy.Publisher(
+                "gripper_controller/command", JointTrajectory, queue_size=1)
 
         # TIAGo action clients
-        # TODO: we will replace the control api to a non-lib method using ros middle-ware
-        self.arm_pos_control_client = actionlib.SimpleActionClient('/arm_controller/follow_joint_trajectory',
-                                                                   FollowJointTrajectoryAction)
-        self.torso_pos_control_client = actionlib.SimpleActionClient('/torso_controller/follow_joint_trajectory',
-                                                                     FollowJointTrajectoryAction)
-        self.head_pos_control_client = actionlib.SimpleActionClient('/head_controller/follow_joint_trajectory',
-                                                                    FollowJointTrajectoryAction)
-        self.head_point_control_client = actionlib.SimpleActionClient('/head_controller/point_head_action',
-                                                                      PointHeadAction)
-        self.play_motion_client = actionlib.SimpleActionClient('/play_motion', PlayMotionAction)
+        # TODO: we will replace the control api to a non-lib method using ros
+        # middle-ware
+        self.arm_pos_control_client = actionlib.SimpleActionClient(
+            '/arm_controller/follow_joint_trajectory', FollowJointTrajectoryAction)
+        self.torso_pos_control_client = actionlib.SimpleActionClient(
+            '/torso_controller/follow_joint_trajectory', FollowJointTrajectoryAction)
+        self.head_pos_control_client = actionlib.SimpleActionClient(
+            '/head_controller/follow_joint_trajectory', FollowJointTrajectoryAction)
+        self.head_point_control_client = actionlib.SimpleActionClient(
+            '/head_controller/point_head_action', PointHeadAction)
+        self.play_motion_client = actionlib.SimpleActionClient(
+            '/play_motion', PlayMotionAction)
 
         # different on end effector setting for gripper and palm
         if self.robot_name == 'titanium':
-            self.hand_pos_control_client = actionlib.SimpleActionClient('/hand_controller/follow_joint_trajectory',
-                                                                        FollowJointTrajectoryAction)
+            self.hand_pos_control_client = actionlib.SimpleActionClient(
+                '/hand_controller/follow_joint_trajectory', FollowJointTrajectoryAction)
             self.ee_link = 'hand_palm_link'
             self.ee_frame = 'hand_grasping_frame'
         else:
-            self.hand_pos_control_client = actionlib.SimpleActionClient('/gripper_controller/follow_joint_trajectory',
-                                                                        FollowJointTrajectoryAction)
+            self.hand_pos_control_client = actionlib.SimpleActionClient(
+                '/gripper_controller/follow_joint_trajectory', FollowJointTrajectoryAction)
             self.ee_link = 'gripper_link'
             self.ee_frame = 'gripper_grasping_frame'
 
         # contact information
         self.lock = Lock()
-        rospy.Subscriber("/gripper_left_finger_contact_state", ContactsState, self._contact_cb)
-        rospy.Subscriber("/gripper_right_finger_contact_state", ContactsState, self._contact_cb)
+        rospy.Subscriber(
+            "/gripper_left_finger_contact_state",
+            ContactsState,
+            self._contact_cb)
+        rospy.Subscriber(
+            "/gripper_right_finger_contact_state",
+            ContactsState,
+            self._contact_cb)
 
         self.robot = URDF.from_parameter_server()
-        self.all_joints = [self.robot.joints[i].name for i in range(len(self.robot.joints))]
+        self.all_joints = [
+            self.robot.joints[i].name for i in range(len(self.robot.joints))]
         self.all_movable_joints = []
         for i, joint in enumerate(self.robot.joints):
             if joint.joint_type != 'fixed':
                 self.all_movable_joints.append(joint.name)
 
-        ###############################################################################################################
-        ########### set task specific env in child class, initialize action and observation space #####################
-        ###############################################################################################################
+        #######################################################################
+        ########### set task specific env in child class, initialize action and
+        #######################################################################
 
         self.state = None  # observation space
         self.joint_pos = None  # current joint position
@@ -116,7 +134,10 @@ class TiagoEnv(gazebo_env.GazeboEnv):
             self.contact_flag = True
             self.contact_flag_released = False
             for i in range(len(bumperstate.states)):
-                print(bumperstate.states[i].collision1_name + " collide with " + bumperstate.states[i].collision2_name)
+                print(
+                    bumperstate.states[i].collision1_name +
+                    " collide with " +
+                    bumperstate.states[i].collision2_name)
         self.lock.release()
 
     def _wait_for_valid_time(self, timeout):
@@ -156,9 +177,13 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         :return:
         """
         action = np.array(action)
-        pos_upper = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_upper) * self.control_period
-        pos_lower = np.array(self.joint_pos) + np.array(self.__joint_vel_limits_lower) * self.control_period
-        return True if np.all(action <= pos_upper) and np.all(action >= pos_lower) else False
+        pos_upper = np.array(
+            self.joint_pos) + np.array(self.__joint_vel_limits_upper) * self.control_period
+        pos_lower = np.array(
+            self.joint_pos) + np.array(self.__joint_vel_limits_lower) * self.control_period
+        return True if np.all(
+            action <= pos_upper) and np.all(
+            action >= pos_lower) else False
 
     def _get_obs(self):
         """
@@ -170,7 +195,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
 
     def _reset(self, random=False):
         # we should stop our controllers firstly or send the initial joint angles to robot
-        # using joint trajectory controller. Or the robot will back to its current position after unpause the simulation
+        # using joint trajectory controller. Or the robot will back to its
+        # current position after unpause the simulation
 
         # reset arm position
         print("=====================================================================================================\n")
@@ -211,7 +237,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         except (rospy.ServiceException) as exc:
             print("/gazebo/pause_physics service call failed:" + str(exc))
 
-        # this will reset the simulation time, and this will affect the ros controllers
+        # this will reset the simulation time, and this will affect the ros
+        # controllers
         rospy.loginfo("reset world")
         self.reset_world()
 
@@ -238,7 +265,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         self.play_motion_client.wait_for_server()
         rospy.loginfo('connected to robot play motion server')
 
-        # we can cancel the trajectory goal, if the controller cannot go to the previous goal
+        # we can cancel the trajectory goal, if the controller cannot go to the
+        # previous goal
         self.play_motion_client.cancel_goal()
 
         g = PlayMotionGoal()
@@ -251,9 +279,13 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         state = self.play_motion_client.get_state()
 
         if reset_ok:
-            rospy.loginfo('Reset successfully with state: ' + self._get_states_string(state))
+            rospy.loginfo(
+                'Reset successfully with state: ' +
+                self._get_states_string(state))
         else:
-            rospy.loginfo('Reset failed with state: ' + self._get_states_string(state))
+            rospy.loginfo(
+                'Reset failed with state: ' +
+                self._get_states_string(state))
 
     def _get_states_string(self, status_code):
         """
@@ -273,7 +305,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         self.play_motion_client.wait_for_server()
         rospy.loginfo('connected to robot play motion server')
 
-        # we can cancel the trajectory goal, if the controller cannot go to the previous goal
+        # we can cancel the trajectory goal, if the controller cannot go to the
+        # previous goal
         self.play_motion_client.cancel_goal()
 
         g = PlayMotionGoal()
@@ -284,9 +317,16 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         rospy.loginfo('Waiting for results (reset)...')
         state = self.play_motion_client.get_state()
 
-        rospy.loginfo('Reset hand motion done with state: ' + self._get_states_string(state))
+        rospy.loginfo(
+            'Reset hand motion done with state: ' +
+            self._get_states_string(state))
 
-    def _set_model_pose(self, model_name, model_pose, model_velocity=[0.0] * 6, reference_frame='world'):
+    def _set_model_pose(
+            self,
+            model_name,
+            model_pose,
+            model_velocity=[0.0] * 6,
+            reference_frame='world'):
         """
         Set model pose attribute in Gazebo
 
@@ -315,8 +355,12 @@ class TiagoEnv(gazebo_env.GazeboEnv):
     def _start_ctrl(self):
 
         rospy.loginfo("STARTING CONTROLLERS")
-        self.switch_ctrl.call(start_controllers=["arm_gazebo_controller", "joint_state_controller"],
-                              stop_controllers=[], strictness=1)
+        self.switch_ctrl.call(
+            start_controllers=[
+                "arm_gazebo_controller",
+                "joint_state_controller"],
+            stop_controllers=[],
+            strictness=1)
 
     def _reset_target_pose(self, target_object_name):
         """
@@ -346,7 +390,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         num_dofs = len(joint_state)
 
         q = joint_state
-        jacobian = ros_utils.get_jacobians(q, self.robot, 'base_link', 'wrist_3_link')
+        jacobian = ros_utils.get_jacobians(
+            q, self.robot, 'base_link', 'wrist_3_link')
         J = np.zeros((dim_pose, num_dofs))
         for i in range(jacobian.shape[0]):
             for j in range(jacobian.shape[1]):
@@ -361,7 +406,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         """
 
         # we should stop our controllers firstly or send the initial joint angles to robot
-        # using joint trajectory controller. Or the robot will back to its current position after unpause the simulation
+        # using joint trajectory controller. Or the robot will back to its
+        # current position after unpause the simulation
 
         # reset arm position
 
@@ -370,9 +416,10 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         # we must stop controllers before pause gazebo physics,
         # or the controller_manager will block waiting for gazebo controllers
         print("reset arm to home state")
-        return_status = self.switch_ctrl.call(start_controllers=[],
-                                              stop_controllers=["arm_controller"],
-                                              strictness=SwitchControllerRequest.BEST_EFFORT)
+        return_status = self.switch_ctrl.call(
+            start_controllers=[],
+            stop_controllers=["arm_controller"],
+            strictness=SwitchControllerRequest.BEST_EFFORT)
         print(return_status)
         print("stop arm controllers!")
 
@@ -386,10 +433,11 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         joint_positions = [0.21, -0.08, -1.24, 1.4, -1.8, 0.0, 0.0]
 
         time.sleep(1)
-        return_status = self.set_model.call(model_name='tiago_' + self.robot_name,
-                                            urdf_param_name="robot_description",
-                                            joint_names=joint_names,
-                                            joint_positions=joint_positions)
+        return_status = self.set_model.call(
+            model_name='tiago_' + self.robot_name,
+            urdf_param_name="robot_description",
+            joint_names=joint_names,
+            joint_positions=joint_positions)
         rospy.loginfo("reset arm state %s", return_status)
 
         time.sleep(3)
@@ -412,7 +460,7 @@ class TiagoEnv(gazebo_env.GazeboEnv):
         make sure the moveit_plan_service package is strarted before using this func.
         :return:
         """
-        if goal == None:
+        if goal is None:
             print("Use default pose as target...")
             goal = self.goal
 
@@ -423,7 +471,8 @@ class TiagoEnv(gazebo_env.GazeboEnv):
             print("/gazebo/unpause_physics service call failed:" + str(exc))
 
         rospy.wait_for_service("/cartesian_arm_plan", 5)
-        self.cartesian_plan = rospy.ServiceProxy("/cartesian_arm_plan", CartesianArmPlan)
+        self.cartesian_plan = rospy.ServiceProxy(
+            "/cartesian_arm_plan", CartesianArmPlan)
         print("Plan to goal position with MoveIt planner")
 
         header = Header()

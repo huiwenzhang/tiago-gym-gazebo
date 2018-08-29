@@ -32,7 +32,8 @@ for i in range(episode_count):
     ob = env.reset()
     time_step_num = 0
     while True:
-        # sample action from action space. FIXME: make sample depend on the `ob` and `reward`, or based on the epsilon-greedy.
+        # sample action from action space. FIXME: make sample depend on the
+        # `ob` and `reward`, or based on the epsilon-greedy.
         action = env.action_space.sample()
         ob, reward, done, _ = env.step(action)
         time_step_num = time_step_num + 1

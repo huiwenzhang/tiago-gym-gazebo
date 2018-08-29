@@ -11,7 +11,8 @@ from gym_gazebo_ros.envs.tiago_robot.tiago_v0 import TiagoEnv
 
 # ros related data structure
 from geometry_msgs.msg import Twist, WrenchStamped, Pose, PoseStamped
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint  # Used for publishing UR joint angles.
+# Used for publishing UR joint angles.
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from control_msgs.msg import *  # control with action interface
 from sensor_msgs.msg import LaserScan, JointState
 from std_msgs.msg import Float64MultiArray, Header
@@ -38,4 +39,3 @@ class TiagoPickEnv(TiagoEnv):
         Initialized Tiago robot Env
         """
         super(TiagoPickEnv, self).__init__()
-

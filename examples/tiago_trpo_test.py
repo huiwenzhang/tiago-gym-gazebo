@@ -12,14 +12,19 @@ from baselines import logger, bench
 import logging
 from baselines.common.misc_util import (
     set_global_seeds,
-    )
+)
 
 import gym_gazebo_ros
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--env', help='environment ID', type=str, default='Reacher-v2')
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '--env',
+        help='environment ID',
+        type=str,
+        default='Reacher-v2')
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--num-timesteps', type=int, default=int(1e6))
     args = parser.parse_args()
@@ -39,19 +44,34 @@ def train(env_id, num_timesteps, seed):
         logger.configure(format_strs=[])
         logger.set_level(logger.DISABLED)
     workerseed = seed + 10000 * MPI.COMM_WORLD.Get_rank()
+
     def policy_fn(name, ob_space, ac_space):
         return MlpPolicy(name=name, ob_space=ob_space, ac_space=ac_space,
-            hid_size=32, num_hid_layers=2)
+                         hid_size=32, num_hid_layers=2)
     # Create envs.
     env = gym.make(env_id)
-    env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)))
+    env = bench.Monitor(
+        env, logger.get_dir() and os.path.join(
+            logger.get_dir(), str(rank)))
     gym.logger.setLevel(logging.WARN)
 
     set_global_seeds(workerseed)
     env.seed(workerseed)
-    trpo_mpi.test(env, policy_fn, epi_num = 29, timesteps_per_batch=300, max_kl=0.01, cg_iters=10, cg_damping=0.1,
-        max_timesteps=num_timesteps, gamma=0.99, lam=0.98, vf_iters=5, vf_stepsize=1e-3)
+    trpo_mpi.test(
+        env,
+        policy_fn,
+        epi_num=29,
+        timesteps_per_batch=300,
+        max_kl=0.01,
+        cg_iters=10,
+        cg_damping=0.1,
+        max_timesteps=num_timesteps,
+        gamma=0.99,
+        lam=0.98,
+        vf_iters=5,
+        vf_stepsize=1e-3)
     env.close()
+
 
 def main():
     args = parse_args()

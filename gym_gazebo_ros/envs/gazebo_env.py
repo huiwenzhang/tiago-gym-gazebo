@@ -24,7 +24,10 @@ class GazeboEnv(gym.Env):
         self.port = "11311"  # str(random_number) #os.environ["ROS_PORT_SIM"]
 
         with open("log.txt", "a") as myfile:
-            myfile.write("export ROS_MASTER_URI=http://localhost:" + self.port + "\n")
+            myfile.write(
+                "export ROS_MASTER_URI=http://localhost:" +
+                self.port +
+                "\n")
 
         # Launch the simulation with the given launchfile name
         rospy.init_node('gym-gazebo', anonymous=True)
@@ -69,7 +72,8 @@ class GazeboEnv(gym.Env):
         print("Initialize a goal point for testing")
         Rotation = tf3d.euler.euler2mat(0, 0, 0, 'sxyz')
         Translation = [0.5, -0.1, 1.0]
-        self.ee_target_pose = tf3d.affines.compose(Translation, Rotation, np.ones(3))
+        self.ee_target_pose = tf3d.affines.compose(
+            Translation, Rotation, np.ones(3))
         quat = tf3d.euler.euler2quat(1, 2, 0, 'sxyz')
         self.goal = Pose()
         self.goal.position.x = 0.5
@@ -97,7 +101,8 @@ class GazeboEnv(gym.Env):
         proccount = tmp.count('gzclient')
         if proccount < 1:
             subprocess.Popen("gzclient")
-            self.gzclient_pid = int(subprocess.check_output(["pidof", "-s", "gzclient"]))
+            self.gzclient_pid = int(
+                subprocess.check_output(["pidof", "-s", "gzclient"]))
         else:
             self.gzclient_pid = 0
 
@@ -132,5 +137,6 @@ class GazeboEnv(gym.Env):
     def _seed(self):
 
         # TODO
-        # From OpenAI API: Sets the seed for this env's random number generator(s)
+        # From OpenAI API: Sets the seed for this env's random number
+        # generator(s)
         pass

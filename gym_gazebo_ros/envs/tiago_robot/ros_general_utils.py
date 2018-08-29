@@ -25,7 +25,7 @@ def get_position(tf, target, source, time):
     # The bottom row is [0 0 0 1].
     transform = np.asmatrix(tf.fromTranslationRotation(translation, rot))
 
-    # Get position relative to source by multiplying the rotation by 
+    # Get position relative to source by multiplying the rotation by
     # the translation. The -1 is for robot matching sign conventions.
 
     # TODO: why not directly to translation? comment by L
@@ -35,6 +35,7 @@ def get_position(tf, target, source, time):
     position = np.asarray(position)[0][:]
 
     return position
+
 
 def approx_equal(a, b, threshold=1e-5):
     """
@@ -61,22 +62,21 @@ def get_ee_points_position(offsets, ee_pos, ee_rot):
 
 
 def get_jacobians(q, robot, base_link, end_link):
-    jacobian = np.zeros((6,6))
+    jacobian = np.zeros((6, 6))
     rospy.wait_for_service('get_jacobian_srv')
     try:
-        get_jacobian = rospy.ServiceProxy('get_jacobian_srv', AssemblerJacobian)
+        get_jacobian = rospy.ServiceProxy(
+            'get_jacobian_srv', AssemblerJacobian)
         resp = get_jacobian(q)
 
         for i in range(6):
             for j in range(6):
-                jacobian[i][j] = resp.jacobian[i*6+j]
+                jacobian[i][j] = resp.jacobian[i * 6 + j]
 
         # return jacobian matrix for current joint state q
         return jacobian
     except rospy.ServiceException as e:
-        print("Service call failed: %s"%e)
-
-
+        print("Service call failed: %s" % e)
 
 
 def distance_of_quaternion(delta_q):
@@ -84,21 +84,19 @@ def distance_of_quaternion(delta_q):
     Args:
         delta_q: delta quaternion from past quaternion to current quaternion (q*q^bar)
 
-    Return: 
+    Return:
         the distance of the quarternions
     """
     real_q = np.array(delta_q[0])
     u_q = np.array(delta_q[1:])
     if np.linalg.norm(u_q) != 0.0:
-        log_q = np.arccos(real_q)* u_q/np.linalg.norm(u_q)
+        log_q = np.arccos(real_q) * u_q / np.linalg.norm(u_q)
     else:
         log_q = np.zeros(3)
 
     if (real_q != -1) or (np.linalg.norm(u_q) != 0.0):
         d = np.linalg.norm(log_q)
     else:
-        d = np.pi 
-    
+        d = np.pi
+
     return d
-
-
